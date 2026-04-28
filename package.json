@@ -1,10 +1,13 @@
 {
-  "name": "chordino-web",
+  "name": "demucs-stems-web",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1"
   }
 }

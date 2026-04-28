@@ -1,66 +1,61 @@
 import { spawn } from "node:child_process";
-import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, stat } from "node:fs/promises";
+import { createReadStream, createWriteStream, unlink, existsSync } from "node:fs";
+import { mkdir as mkdirAsync, stat, readdir } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import archiver from "archiver";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8000);
 const UPLOAD_DIR = path.join(__dirname, ".runtime", "uploads");
-const BUNDLED_SONIC_ANNOTATOR = path.join(
-  __dirname,
-  ".runtime",
-  "tools",
-  "sonic-annotator-1.7.0-linux64-static",
-  "squashfs-root",
-  "usr",
-  "bin",
-  "sonic-annotator",
-);
-const BUNDLED_SONIC_LIB_DIR = path.join(
-  __dirname,
-  ".runtime",
-  "tools",
-  "sonic-annotator-1.7.0-linux64-static",
-  "squashfs-root",
-  "usr",
-  "lib",
-);
-const BUNDLED_VAMP_PATH = path.join(__dirname, ".runtime", "vamp");
-const SONIC_ANNOTATOR = process.env.SONIC_ANNOTATOR || BUNDLED_SONIC_ANNOTATOR;
-const CHORDINO_TRANSFORM = process.env.CHORDINO_TRANSFORM || "vamp:nnls-chroma:chordino:simplechord";
-const SONIC_ENV = {
-  VAMP_PATH: process.env.VAMP_PATH || BUNDLED_VAMP_PATH,
-  LD_LIBRARY_PATH: [BUNDLED_SONIC_LIB_DIR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":"),
-};
+const SEPARATED_DIR = path.join(__dirname, ".runtime", "separated");
+const DEMUCS = process.env.DEMUCS || "demucs";
 const MAX_UPLOAD_BYTES = 120 * 1024 * 1024;
-const MAX_JSON_BYTES = 1024 * 1024;
-const NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
-const PYTHON = process.env.PYTHON || "python3";
+const AUTO_DELETE_HOURS = 1;
+const AVAILABLE_MODELS = [
+  { id: "htdemucs", name: "htdemucs (标准 4 轨)", stems: 4 },
+  { id: "htdemucs_ft", name: "htdemucs_ft (Fine-tuned)", stems: 4 },
+  { id: "mdx", name: "mdx (MDX 基础)", stems: 4 },
+  { id: "mdx_q", name: "mdx_q (MDX 量化版)", stems: 4 },
+  { id: "mdx_extra_q", name: "mdx_extra_q (MDX 增强量化)", stems: 4 },
+];
 
-await mkdir(UPLOAD_DIR, { recursive: true });
+const jobs = new Map();
+
+await mkdirAsync(UPLOAD_DIR, { recursive: true });
+await mkdirAsync(SEPARATED_DIR, { recursive: true });
 
 const server = http.createServer(async (request, response) => {
   try {
     if (request.method === "GET" && request.url === "/api/health") {
-      return sendJson(response, 200, await getHealth());
+      return handleHealth(request, response);
     }
 
-    if (request.method === "POST" && request.url === "/api/analyze") {
-      return handleAnalyze(request, response);
+    if (request.method === "GET" && request.url === "/api/models") {
+      return handleModels(request, response);
     }
 
-    if (request.method === "POST" && request.url === "/api/audio-features") {
-      return handleAudioFeatures(request, response);
+    if (request.method === "POST" && request.url === "/api/stems") {
+      return handleStems(request, response);
     }
 
-    if (request.method === "POST" && request.url === "/api/song-meta") {
-      return handleSongMeta(request, response);
+    if (request.method === "GET" && request.url.startsWith("/api/status/")) {
+      const jobId = request.url.split("/")[3];
+      return handleStatus(request, response, jobId);
+    }
+
+    if (request.method === "GET" && request.url.startsWith("/api/download/")) {
+      const url = new URL(request.url, `http://${request.headers.host}`);
+      const pathParts = url.pathname.split("/").filter(Boolean);
+      const jobId = pathParts[2];
+      const stem = pathParts[3];
+      return handleDownload(request, response, jobId, stem);
     }
 
     return serveStatic(request, response);
   } catch (error) {
+    console.error("Server error:", error);
     return sendJson(response, 500, {
       error: "internal_error",
       message: error.message || "服务器内部错误。",
@@ -69,10 +64,36 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Chordino Web server listening on http://127.0.0.1:${PORT}`);
+  console.log(`Demucs Stems server listening on http://127.0.0.1:${PORT}`);
 });
 
-async function handleAnalyze(request, response) {
+async function handleHealth(request, response) {
+  try {
+    const result = await runCommand(DEMUCS, ["--help"], 5000);
+    const demucsAvailable = result.code === 0;
+    sendJson(response, 200, {
+      ok: demucsAvailable,
+      version: demucsAvailable ? "available" : "not found",
+      message: demucsAvailable
+        ? "Demucs 可用"
+        : "未检测到 Demucs，请安装: pip install demucs",
+    });
+  } catch (error) {
+    sendJson(response, 200, {
+      ok: false,
+      version: null,
+      message: `Demucs 不可用: ${error.message}`,
+    });
+  }
+}
+
+async function handleModels(request, response) {
+  sendJson(response, 200, {
+    models: AVAILABLE_MODELS,
+  });
+}
+
+async function handleStems(request, response) {
   try {
     const contentType = request.headers["content-type"] || "";
     const boundary = contentType.match(/boundary=(.+)$/)?.[1];
@@ -86,6 +107,7 @@ async function handleAnalyze(request, response) {
 
     const body = await readRequestBody(request, MAX_UPLOAD_BYTES);
     const file = await extractMultipartFile(body, boundary);
+    const model = await extractModelFromBody(body);
 
     if (!file) {
       return sendJson(response, 400, {
@@ -94,464 +116,212 @@ async function handleAnalyze(request, response) {
       });
     }
 
-    const audioFeatures = await runLibrosa(file.path);
-    const chordinoResult = await runChordino(file.path);
-    const metadata = buildSongMetadata(file.fileName, audioFeatures);
-    const result = {
-      ...chordinoResult,
-      audioFeatures,
-      metadata,
+    const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const job = {
+      id: jobId,
+      status: "processing",
+      progress: 0,
+      fileName: file.fileName,
+      model: model,
+      stems: {},
+      createdAt: Date.now(),
+      inputPath: file.path,
+      outputDir: path.join(SEPARATED_DIR, jobId),
     };
-    return sendJson(response, 200, result);
+    jobs.set(jobId, job);
+
+    runDemucs(job).catch((err) => {
+      const j = jobs.get(jobId);
+      if (j) {
+        j.status = "error";
+        j.error = err.message;
+      }
+    });
+
+    sendJson(response, 202, {
+      jobId,
+      message: "分轨任务已创建，请使用 jobId 查询状态。",
+    });
   } catch (error) {
-    return sendJson(response, error.statusCode || 500, {
-      error: error.payload?.error || "analysis_failed",
-      message: error.message || "和弦分析失败。",
-      detail: error.payload?.detail || error.payload || null,
+    sendJson(response, error.statusCode || 500, {
+      error: error.payload?.error || "stems_failed",
+      message: error.message || "分轨处理失败。",
     });
   }
 }
 
-async function handleAudioFeatures(request, response) {
-  try {
-    const file = await readUploadedFile(request);
-    const features = await runLibrosa(file.path);
-    return sendJson(response, 200, features);
-  } catch (error) {
-    return sendJson(response, error.statusCode || 500, {
-      error: error.payload?.error || "audio_features_failed",
-      message: error.message || "本地音频特征分析失败。",
-      detail: error.payload?.detail || null,
+async function handleStatus(request, response, jobId) {
+  const job = jobs.get(jobId);
+
+  if (!job) {
+    return sendJson(response, 404, {
+      error: "job_not_found",
+      message: "未找到指定的任务或已过期。",
     });
   }
-}
 
-async function handleSongMeta(request, response) {
-  try {
-    const body = await readJsonBody(request, MAX_JSON_BYTES);
-    const fileName = typeof body.fileName === "string" ? body.fileName : "";
-    const audioFeatures = body.audioFeatures && typeof body.audioFeatures === "object" ? body.audioFeatures : null;
-
-    return sendJson(response, 200, buildSongMetadata(fileName, audioFeatures));
-  } catch (error) {
-    return sendJson(response, 500, {
-      error: "metadata_failed",
-      message: error.message || "歌曲元数据聚合失败。",
-    });
-  }
-}
-
-async function readUploadedFile(request) {
-  const contentType = request.headers["content-type"] || "";
-  const boundary = contentType.match(/boundary=(.+)$/)?.[1];
-
-  if (!boundary) {
-    const error = new Error("请求必须使用 multipart/form-data 上传音频。");
-    error.statusCode = 400;
-    error.payload = { error: "invalid_upload" };
-    throw error;
-  }
-
-  const body = await readRequestBody(request, MAX_UPLOAD_BYTES);
-  const file = await extractMultipartFile(body, boundary);
-
-  if (!file) {
-    const error = new Error("没有找到名为 file 的音频字段。");
-    error.statusCode = 400;
-    error.payload = { error: "missing_file" };
-    throw error;
-  }
-
-  return file;
-}
-
-async function getHealth() {
-  const version = await runCommand(SONIC_ANNOTATOR, ["--version"], 5000, SONIC_ENV);
-  if (version.code !== 0) {
-    return {
-      ok: false,
-      analyzer: SONIC_ANNOTATOR,
-      transform: CHORDINO_TRANSFORM,
-      message: "未检测到 sonic-annotator。请安装 sonic-annotator 与 Vamp NNLS Chroma/Chordino 插件。",
-      detail: version.stderr || version.error || "command_not_found",
-    };
-  }
-
-  const plugins = await runCommand(SONIC_ANNOTATOR, ["-l"], 8000, SONIC_ENV);
-  const pluginOutput = `${plugins.stdout}\n${plugins.stderr}`.toLowerCase();
-  const hasChordino = pluginOutput.includes("chordino") || pluginOutput.includes("nnls-chroma");
-
-  return {
-    ok: hasChordino,
-    analyzer: SONIC_ANNOTATOR,
-    transform: CHORDINO_TRANSFORM,
-    version: version.stdout.trim() || version.stderr.trim(),
-    message: hasChordino
-      ? "sonic-annotator 与 Chordino 插件可用。"
-      : "检测到 sonic-annotator，但没有发现 Chordino/NNLS Chroma Vamp 插件。",
-  };
-}
-
-async function runChordino(filePath) {
-  const health = await getHealth();
-  if (!health.ok) {
-    const error = new Error(health.message);
-    error.statusCode = 503;
-    error.payload = health;
-    throw error;
-  }
-
-  const output = await runCommand(
-    SONIC_ANNOTATOR,
-    ["-d", CHORDINO_TRANSFORM, "-w", "csv", "--csv-stdout", filePath],
-    120000,
-    SONIC_ENV,
-  );
-
-  if (output.code !== 0) {
-    const error = new Error(output.stderr || "sonic-annotator 执行失败。");
-    error.statusCode = 502;
-    error.payload = { error: "analyzer_failed", detail: output.stderr };
-    throw error;
-  }
-
-  const timeline = parseChordinoCsv(output.stdout);
-  const duration = timeline.at(-1)?.end || 0;
-
-  return {
-    source: "native-chordino",
-    analyzer: SONIC_ANNOTATOR,
-    transform: CHORDINO_TRANSFORM,
-    duration,
-    frameCount: timeline.length,
-    mainChord: findMainChord(timeline),
-    globalChroma: estimateChromaFromTimeline(timeline),
-    timeline,
-  };
-}
-
-async function runLibrosa(filePath) {
-  const output = await runCommand(PYTHON, [path.join(__dirname, "analyze_audio.py"), filePath], 120000);
-
-  if (output.code !== 0) {
-    const parsed = parseJson(output.stderr) || parseJson(output.stdout);
-    const error = new Error(parsed?.message || output.stderr || "librosa 音频分析失败。");
-    error.statusCode = 502;
-    error.payload = { error: parsed?.error || "librosa_failed", detail: output.stderr };
-    throw error;
-  }
-
-  const parsed = parseJson(output.stdout);
-  if (!parsed) {
-    const error = new Error("librosa 输出不是有效 JSON。");
-    error.statusCode = 502;
-    error.payload = { error: "invalid_librosa_output", detail: output.stdout };
-    throw error;
-  }
-
-  return parsed;
-}
-
-function parseChordinoCsv(csv) {
-  const rows = csv
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map(parseCsvLine)
-    .map(parseChordRow)
-    .filter(Boolean)
-    .sort((a, b) => a.start - b.start);
-
-  return rows.map((row, index) => {
-    const nextStart = rows[index + 1]?.start;
-    return {
-      chord: normalizeChordLabel(row.chord),
-      start: row.start,
-      end: row.duration ? row.start + row.duration : nextStart || row.start + 0.5,
-      confidence: null,
-      confidenceSource: "not-provided-by-chordino",
-    };
+  sendJson(response, 200, {
+    status: job.status,
+    progress: job.progress,
+    error: job.error,
+    stems: job.stems,
+    message: job.status === "completed" ? "分轨完成" : "处理中",
   });
 }
 
-function parseChordRow(columns) {
-  const numbers = columns
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .map((value) => Number(value))
-    .filter(Number.isFinite);
-  const label = [...columns].reverse().find((value) => value && !Number.isFinite(Number(value)));
+async function handleDownload(request, response, jobId, stem) {
+  const job = jobs.get(jobId);
 
-  if (!label || !numbers.length) {
-    return null;
+  if (!job || job.status !== "completed") {
+    return sendJson(response, 404, {
+      error: "not_ready",
+      message: "分轨任务未完成或不存在。",
+    });
   }
 
-  return {
-    start: numbers[0],
-    duration: numbers.length > 1 ? numbers[1] : 0,
-    chord: label,
-  };
+  if (stem === "all") {
+    return serveAllStemsZip(response, job);
+  }
+
+  const filePath = job.stems[stem];
+  if (!filePath) {
+    return sendJson(response, 404, {
+      error: "stem_not_found",
+      message: `未找到音轨: ${stem}`,
+    });
+  }
+
+  const fileStat = await stat(filePath).catch(() => null);
+  if (!fileStat?.isFile()) {
+    return sendJson(response, 404, {
+      error: "file_not_found",
+      message: "音轨文件不存在。",
+    });
+  }
+
+  response.writeHead(200, {
+    "Content-Type": "audio/wav",
+    "Content-Disposition": `attachment; filename="${stem}.wav"`,
+    "Content-Length": fileStat.size,
+  });
+
+  createReadStream(filePath).pipe(response);
 }
 
-function parseCsvLine(line) {
-  const values = [];
-  let current = "";
-  let quoted = false;
+async function serveAllStemsZip(response, job) {
+  const archive = archiver("zip", { zlib: { level: 9 } });
 
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    const next = line[i + 1];
+  response.writeHead(200, {
+    "Content-Type": "application/zip",
+    "Content-Disposition": `attachment; filename="stems_${job.id}.zip"`,
+  });
 
-    if (char === '"' && quoted && next === '"') {
-      current += '"';
-      i += 1;
-      continue;
+  archive.pipe(response);
+
+  for (const [stemName, filePath] of Object.entries(job.stems)) {
+    try {
+      const statResult = await stat(filePath);
+      if (statResult.isFile()) {
+        archive.file(filePath, { name: `${stemName}.wav` });
+      }
+    } catch (e) {
+      console.error(`Failed to add ${stemName}:`, e);
     }
+  }
 
-    if (char === '"') {
-      quoted = !quoted;
-      continue;
+  archive.finalize();
+}
+
+async function runDemucs(job) {
+  await mkdirAsync(job.outputDir, { recursive: true });
+
+  job.status = "downloading";
+  job.progress = 5;
+
+  const modelArg = job.model || "htdemucs";
+  const result = await runCommand(
+    DEMUCS,
+    ["-o", job.outputDir, "-n", modelArg, job.inputPath],
+    600000,
+  );
+
+  if (result.code !== 0) {
+    throw new Error(`Demucs 执行失败: ${result.stderr || result.stdout}`);
+  }
+
+  job.status = "completed";
+  job.progress = 100;
+
+  const modelDir = path.join(job.outputDir, modelArg, path.basename(job.inputPath).replace(/\.[^.]+$/, ""));
+  const stems = {};
+
+  for (const stem of ["vocals", "drums", "bass", "other"]) {
+    const stemPath = path.join(modelDir, `${stem}.wav`);
+    try {
+      const statResult = await stat(stemPath);
+      if (statResult.isFile()) {
+        stems[stem] = stemPath;
+      }
+    } catch (e) {
+      console.error(`Stem not found: ${stem}`);
     }
-
-    if (char === "," && !quoted) {
-      values.push(current.trim());
-      current = "";
-      continue;
-    }
-
-    current += char;
   }
 
-  values.push(current.trim());
-  return values;
-}
+  job.stems = stems;
 
-function normalizeChordLabel(label) {
-  const cleaned = label.replace(/^"|"$/g, "").trim();
-  if (!cleaned || cleaned === "N" || cleaned.toLowerCase() === "no chord") {
-    return "N";
-  }
-  return cleaned.replace(/:maj$/, "").replace(/:min$/, "m");
-}
-
-function findMainChord(timeline) {
-  const totals = new Map();
-
-  for (const segment of timeline) {
-    if (segment.chord === "N") {
-      continue;
-    }
-    totals.set(segment.chord, (totals.get(segment.chord) || 0) + segment.end - segment.start);
-  }
-
-  return [...totals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "N";
-}
-
-function estimateKeyFromTimeline(timeline, mainChord) {
-  const scores = new Array(24).fill(0);
-  const roots = new Map([
-    ["C", 0],
-    ["C#", 1],
-    ["Db", 1],
-    ["D", 2],
-    ["D#", 3],
-    ["Eb", 3],
-    ["E", 4],
-    ["F", 5],
-    ["F#", 6],
-    ["Gb", 6],
-    ["G", 7],
-    ["G#", 8],
-    ["Ab", 8],
-    ["A", 9],
-    ["A#", 10],
-    ["Bb", 10],
-    ["B", 11],
-  ]);
-
-  for (const segment of timeline) {
-    const chord = String(segment.chord || "");
-    const match = chord.match(/^([A-G][b#]?)(m|min|maj|dim|sus|7|$)/);
-    const root = roots.get(match?.[1]);
-    if (root === undefined) {
-      continue;
-    }
-
-    const weight = Math.max(0.05, Number(segment.end || 0) - Number(segment.start || 0));
-    const isMinor = /^(?:[A-G][b#]?)(m|min)/.test(chord);
-    scores[root] += weight * (isMinor ? 0.75 : 1);
-    scores[12 + root] += weight * (isMinor ? 1 : 0.45);
-  }
-
-  const mainMatch = String(mainChord || "").match(/^([A-G][b#]?)(m|min)?/);
-  const mainRoot = roots.get(mainMatch?.[1]);
-  if (mainRoot !== undefined) {
-    scores[mainMatch?.[2] ? 12 + mainRoot : mainRoot] += 2;
-  }
-
-  const total = scores.reduce((sum, value) => sum + value, 0);
-  const bestIndex = scores.indexOf(Math.max(...scores));
-  const confidence = total ? scores[bestIndex] / total : 0;
-
-  if (bestIndex < 0 || scores[bestIndex] === 0) {
-    return { key: null, confidence: 0, notes: "没有足够的和弦片段估算调性。" };
-  }
-
-  const root = NOTE_NAMES[bestIndex % 12];
-  const mode = bestIndex >= 12 ? "minor" : "major";
-  return {
-    key: `${root} ${mode}`,
-    confidence: Number(confidence.toFixed(2)),
-    notes: "根据和弦根音持续时间与主和弦推断，非专业调性检测模型。",
-  };
-}
-
-function parseSongQuery(fileName) {
-  const baseName = path.basename(fileName || "").replace(/\.[^.]+$/, "");
-  const cleaned = baseName
-    .replace(/[_]+/g, " ")
-    .replace(/\s*\([^)]*\)|\s*\[[^\]]*\]/g, " ")
-    .replace(/\b(official|audio|video|lyrics|lyric|mv|hq|remaster(?:ed)?|clean|explicit)\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const separator = cleaned.match(/\s+-\s+|\s+–\s+|\s+—\s+/)?.[0];
-
-  if (!separator) {
-    return {
-      raw: cleaned || baseName,
-      title: cleaned || baseName,
-      artist: "",
-      searchTerm: cleaned || baseName,
-      source: "filename",
-    };
-  }
-
-  const [left, ...rest] = cleaned.split(separator);
-  const right = rest.join(separator).trim();
-
-  return {
-    raw: cleaned,
-    title: right || left,
-    artist: right ? left.trim() : "",
-    searchTerm: right ? `${right} ${left}` : cleaned,
-    source: "filename-artist-title",
-  };
-}
-
-function buildSongMetadata(fileName, audioFeatures) {
-  const query = parseSongQuery(fileName);
-  const timeSignatureSource = audioFeatures?.timeSignatureSource || "local-audio-feature-fusion";
-  const meterSourceLabel = formatFeatureSourceLabel(timeSignatureSource);
-  const sources = [
-    buildSource(
-      "local-audio-feature-fusion",
-      "本地综合音频分析",
-      Boolean(audioFeatures),
-      audioFeatures?.bpmConfidence || 0,
-      null,
-      "先融合 librosa、Essentia 与 Aubio 的 BPM/beat 候选，再进行和弦识别。",
-    ),
-    buildSource(
-      "librosa-ks-profile",
-      "librosa 调性估算",
-      Boolean(audioFeatures?.key),
-      audioFeatures?.keyConfidence || 0,
-      null,
-      "使用 chroma_cqt 与 Krumhansl-Schmuckler key profile 估算调性。",
-    ),
-    buildSource(
-      timeSignatureSource,
-      meterSourceLabel,
-      Boolean(audioFeatures?.timeSignature),
-      audioFeatures?.timeSignatureConfidence || 0,
-      null,
-      audioFeatures?.notes || "使用 beat 序列与重音周期估算拍号。",
-    ),
-  ].filter(Boolean);
-
-  return {
-    query,
-    final: {
-      key: audioFeatures?.key || null,
-      bpm: audioFeatures?.bpm || null,
-      timeSignature: audioFeatures?.timeSignature || null,
-      confidence: Math.max(
-        audioFeatures?.bpmConfidence || 0,
-        audioFeatures?.keyConfidence || 0,
-        audioFeatures?.timeSignatureConfidence || 0,
-      ),
-      note: audioFeatures
-        ? `BPM/beat 来自 librosa、Essentia 与 Aubio 候选融合；调性来自本地 chroma 分析；拍号来自 ${meterSourceLabel} 的 beat 序列启发式估算。`
-        : "未收到本地音频特征结果。",
-    },
-    candidates: {
-      localAudio: audioFeatures,
-      bpm: audioFeatures?.bpmCandidates || [],
-      key: audioFeatures?.keyCandidates || [],
-    },
-    sources,
-  };
-}
-
-function formatFeatureSourceLabel(source) {
-  if (source === "essentia-rhythmextractor2013") {
-    return "Essentia RhythmExtractor2013";
-  }
-  if (source === "aubio") {
-    return "Aubio beat tracking";
-  }
-  if (source === "librosa") {
-    return "librosa beat tracking";
-  }
-  return "本地综合音频分析";
-}
-
-function buildSource(id, label, available, confidence, url, notes) {
-  return { id, label, available, confidence, url, notes };
-}
-
-function parseJson(value) {
   try {
-    const trimmed = String(value || "").trim();
-    if (!trimmed) {
-      return null;
-    }
-    return JSON.parse(trimmed.split(/\r?\n/).at(-1));
-  } catch {
-    return null;
-  }
+    await unlink(job.inputPath).catch(() => {});
+  } catch (e) {}
+
+  scheduleCleanup(job);
+
+  return stems;
 }
 
-function estimateChromaFromTimeline(timeline) {
-  const chroma = new Array(12).fill(0);
-  const names = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
-  const aliases = new Map([
-    ["Db", "C#"],
-    ["D#", "Eb"],
-    ["Gb", "F#"],
-    ["G#", "Ab"],
-    ["A#", "Bb"],
-  ]);
+function scheduleCleanup(job) {
+  const delay = AUTO_DELETE_HOURS * 60 * 60 * 1000;
+  console.log(`[Cleanup] Scheduled deletion of job ${job.id} in ${AUTO_DELETE_HOURS} hour(s)`);
 
-  for (const segment of timeline) {
-    const root = segment.chord.match(/^[A-G][b#]?/)?.[0];
-    const normalized = aliases.get(root) || root;
-    const index = names.indexOf(normalized);
-    if (index >= 0) {
-      chroma[index] += Math.max(0.01, segment.end - segment.start);
+  setTimeout(async () => {
+    const j = jobs.get(job.id);
+    if (j && j.status === "completed") {
+      console.log(`[Cleanup] Deleting job ${job.id} files...`);
+      try {
+        await unlink(job.inputPath).catch(() => {});
+        await cleanupDir(job.outputDir);
+        jobs.delete(job.id);
+        console.log(`[Cleanup] Job ${job.id} deleted`);
+      } catch (e) {
+        console.error(`[Cleanup] Failed to delete job ${job.id}:`, e);
+      }
     }
-  }
-
-  const max = Math.max(...chroma, 1);
-  return chroma.map((value) => value / max);
+  }, delay);
 }
 
-function runCommand(command, args, timeoutMs, extraEnv = {}) {
+async function cleanupDir(dirPath) {
+  try {
+    const entries = await readdir(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        await cleanupDir(fullPath);
+      } else {
+        await unlink(fullPath).catch(() => {});
+      }
+    }
+    await unlink(dirPath).catch(() => {});
+  } catch (e) {}
+}
+
+function runCommand(command, args, timeoutMs) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd: __dirname, env: { ...process.env, ...extraEnv } });
+    const child = spawn(command, args, { cwd: __dirname, env: { ...process.env } });
     let stdout = "";
     let stderr = "";
-    const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      resolve({ code: -1, stdout, stderr, error: "Command timeout" });
+    }, timeoutMs);
 
     child.stdout?.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -590,14 +360,6 @@ function readRequestBody(request, maxBytes) {
   });
 }
 
-async function readJsonBody(request, maxBytes) {
-  const body = await readRequestBody(request, maxBytes);
-  if (!body.length) {
-    return {};
-  }
-  return JSON.parse(body.toString("utf8"));
-}
-
 async function extractMultipartFile(body, boundary) {
   const boundaryText = `--${boundary}`;
   const sections = body.toString("latin1").split(boundaryText);
@@ -623,6 +385,10 @@ async function extractMultipartFile(body, boundary) {
   }
 
   return null;
+}
+
+async function extractModelFromBody(body) {
+  return "htdemucs";
 }
 
 function writeFileFromLatin1(target, content) {
@@ -684,3 +450,10 @@ function sendJson(response, statusCode, data) {
 process.on("uncaughtException", (error) => {
   console.error(error);
 });
+
+setInterval(() => {
+  console.log(`[Watchdog] Server running, jobs: ${jobs.size}, time: ${new Date().toISOString()}`);
+}, 60000);
+
+console.log("[Watchdog] Server started with watchdog enabled");
+console.log(`[Config] Auto-delete after ${AUTO_DELETE_HOURS} hour(s)`);
