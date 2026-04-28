@@ -78,10 +78,23 @@
             <select id="model-select">
               <option value="htdemucs">htdemucs (标准 4 轨)</option>
               <option value="htdemucs_ft">htdemucs_ft (Fine-tuned)</option>
+              <option value="htdemucs_6s">htdemucs_6s (实验 6 轨)</option>
               <option value="mdx">mdx (MDX 基础)</option>
+              <option value="mdx_extra">mdx_extra (MDX 高精度)</option>
               <option value="mdx_q">mdx_q (MDX 量化版)</option>
               <option value="mdx_extra_q">mdx_extra_q (MDX 增强量化)</option>
+              <option value="hdemucs_mmi">hdemucs_mmi (V3 兼容旗舰)</option>
             </select>
+          </div>
+
+          <div class="model-selector">
+            <label for="separation-mode">分轨模式</label>
+            <select id="separation-mode">
+              <option value="four">4轨分离 (人声/鼓/贝斯/其他)</option>
+              <option value="six">6轨分离 (含吉他/钢琴)</option>
+              <option value="vocals">2轨分离 (人声/伴奏)</option>
+            </select>
+            <p class="model-hint" id="model-hint" role="note"></p>
           </div>
 
           <label class="drop-zone" for="audio-file" id="drop-zone">
@@ -153,6 +166,20 @@
           </div>
           <div class="master-time" id="master-time">0:00 / 0:00</div>
         </div>
+        <div class="master-progress-wrap">
+          <input
+            id="master-progress"
+            class="master-progress"
+            type="range"
+            min="0"
+            max="1000"
+            value="0"
+            step="1"
+            disabled
+            aria-label="播放进度"
+          />
+        </div>
+        <div class="stems-load-status" id="stems-load-status"></div>
 
         <div class="stems-grid" id="stems-grid">
           <div class="stem-card" data-stem="vocals">
@@ -205,7 +232,7 @@
 
           <div class="stem-card" data-stem="other">
             <div class="stem-card__header">
-              <span class="stem-icon">🎹</span>
+              <span class="stem-icon">🎻</span>
               <h3>其他</h3>
               <button class="mute-btn stem-mute" data-stem="other" title="静音">🔊</button>
               <input type="range" class="volume-slider stem-volume" data-stem="other" min="0" max="100" value="80" title="音量">
@@ -218,12 +245,45 @@
               <button class="secondary-action stem-download" data-stem="other" disabled>下载</button>
             </div>
           </div>
+
+          <div class="stem-card" data-stem="guitar">
+            <div class="stem-card__header">
+              <span class="stem-icon">🎸</span>
+              <h3>吉他</h3>
+              <button class="mute-btn stem-mute" data-stem="guitar" title="静音">🔊</button>
+              <input type="range" class="volume-slider stem-volume" data-stem="guitar" min="0" max="100" value="80" title="音量">
+            </div>
+            <div class="stem-waveform" id="waveform-guitar">
+              <canvas id="canvas-guitar" width="400" height="80"></canvas>
+            </div>
+            <div class="stem-controls">
+              <button class="play-action stem-play" data-stem="guitar" disabled>播放</button>
+              <button class="secondary-action stem-download" data-stem="guitar" disabled>下载</button>
+            </div>
+          </div>
+
+          <div class="stem-card" data-stem="piano">
+            <div class="stem-card__header">
+              <span class="stem-icon">🎹</span>
+              <h3>钢琴</h3>
+              <button class="mute-btn stem-mute" data-stem="piano" title="静音">🔊</button>
+              <input type="range" class="volume-slider stem-volume" data-stem="piano" min="0" max="100" value="80" title="音量">
+            </div>
+            <div class="stem-waveform" id="waveform-piano">
+              <canvas id="canvas-piano" width="400" height="80"></canvas>
+            </div>
+            <div class="stem-controls">
+              <button class="play-action stem-play" data-stem="piano" disabled>播放</button>
+              <button class="secondary-action stem-download" data-stem="piano" disabled>下载</button>
+            </div>
+          </div>
         </div>
 
         <div class="download-all-section">
           <button class="primary-action" id="download-all-button" disabled>
             下载全部音轨 (ZIP)
           </button>
+          <p class="download-note">播放缓存用于试听，下载文件仍从服务器生成与提供。</p>
         </div>
 
         

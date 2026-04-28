@@ -10,18 +10,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8000);
 const UPLOAD_DIR = path.join(__dirname, ".runtime", "uploads");
 const SEPARATED_DIR = path.join(__dirname, ".runtime", "separated");
-const DEMUCS = process.env.DEMUCS || "demucs";
+const DEMUCS_CANDIDATES = [process.env.DEMUCS, "demucs", "/usr/local/bin/demucs"].filter(Boolean);
+let resolvedDemucsCommand = null;
 const MAX_UPLOAD_BYTES = 120 * 1024 * 1024;
 const AUTO_DELETE_HOURS = 1;
 const AVAILABLE_MODELS = [
   { id: "htdemucs", name: "htdemucs (标准 4 轨)", stems: 4 },
   { id: "htdemucs_ft", name: "htdemucs_ft (Fine-tuned)", stems: 4 },
+  { id: "htdemucs_6s", name: "htdemucs_6s (实验 6 轨)", stems: 6 },
   { id: "mdx", name: "mdx (MDX 基础)", stems: 4 },
+  { id: "mdx_extra", name: "mdx_extra (MDX 高精度)", stems: 4 },
   { id: "mdx_q", name: "mdx_q (MDX 量化版)", stems: 4 },
   { id: "mdx_extra_q", name: "mdx_extra_q (MDX 增强量化)", stems: 4 },
+  { id: "hdemucs_mmi", name: "hdemucs_mmi (V3 兼容旗舰)", stems: 4 },
 ];
 
 const jobs = new Map();
+const pendingJobs = [];
+let activeJob = null;
 
 await mkdirAsync(UPLOAD_DIR, { recursive: true });
 await mkdirAsync(SEPARATED_DIR, { recursive: true });
@@ -69,7 +75,8 @@ server.listen(PORT, "0.0.0.0", () => {
 
 async function handleHealth(request, response) {
   try {
-    const result = await runCommand(DEMUCS, ["--help"], 5000);
+    const demucsCommand = await resolveDemucsCommand();
+    const result = await runCommand(demucsCommand, ["--help"], 5000);
     const demucsAvailable = result.code === 0;
     sendJson(response, 200, {
       ok: demucsAvailable,
@@ -105,9 +112,10 @@ async function handleStems(request, response) {
       });
     }
 
-    const body = await readRequestBody(request, MAX_UPLOAD_BYTES);
-    const file = await extractMultipartFile(body, boundary);
-    const model = await extractModelFromBody(body);
+    const upload = await parseMultipartStream(request, boundary, MAX_UPLOAD_BYTES);
+    const file = upload.file;
+    const model = normalizeModel(upload.fields.model);
+    const separationMode = normalizeSeparationMode(upload.fields.separationMode);
 
     if (!file) {
       return sendJson(response, 400, {
@@ -119,24 +127,19 @@ async function handleStems(request, response) {
     const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const job = {
       id: jobId,
-      status: "processing",
+      status: "queued",
       progress: 0,
       fileName: file.fileName,
       model: model,
+      separationMode,
       stems: {},
       createdAt: Date.now(),
       inputPath: file.path,
       outputDir: path.join(SEPARATED_DIR, jobId),
     };
     jobs.set(jobId, job);
-
-    runDemucs(job).catch((err) => {
-      const j = jobs.get(jobId);
-      if (j) {
-        j.status = "error";
-        j.error = err.message;
-      }
-    });
+    pendingJobs.push(jobId);
+    processNextJob();
 
     sendJson(response, 202, {
       jobId,
@@ -163,9 +166,18 @@ async function handleStatus(request, response, jobId) {
   sendJson(response, 200, {
     status: job.status,
     progress: job.progress,
+    model: job.model,
+    separationMode: job.separationMode,
     error: job.error,
     stems: job.stems,
-    message: job.status === "completed" ? "分轨完成" : "处理中",
+    message:
+      job.status === "completed"
+        ? "分轨完成"
+        : job.status === "error"
+          ? "分轨失败"
+          : job.status === "queued"
+            ? "排队中"
+          : "处理中",
   });
 }
 
@@ -238,12 +250,16 @@ async function runDemucs(job) {
   job.status = "downloading";
   job.progress = 5;
 
-  const modelArg = job.model || "htdemucs";
-  const result = await runCommand(
-    DEMUCS,
-    ["-o", job.outputDir, "-n", modelArg, job.inputPath],
-    600000,
-  );
+  const modelConfig = AVAILABLE_MODELS.find((item) => item.id === job.model) || AVAILABLE_MODELS[0];
+  const modelArg = modelConfig.id;
+  const commandArgs = ["-o", job.outputDir, "-n", modelArg];
+  if (job.separationMode === "vocals") {
+    commandArgs.push("--two-stems", "vocals");
+  }
+  commandArgs.push(job.inputPath);
+
+  const demucsCommand = await resolveDemucsCommand();
+  const result = await runCommand(demucsCommand, commandArgs, 600000);
 
   if (result.code !== 0) {
     throw new Error(`Demucs 执行失败: ${result.stderr || result.stdout}`);
@@ -255,15 +271,38 @@ async function runDemucs(job) {
   const modelDir = path.join(job.outputDir, modelArg, path.basename(job.inputPath).replace(/\.[^.]+$/, ""));
   const stems = {};
 
-  for (const stem of ["vocals", "drums", "bass", "other"]) {
-    const stemPath = path.join(modelDir, `${stem}.wav`);
-    try {
-      const statResult = await stat(stemPath);
-      if (statResult.isFile()) {
-        stems[stem] = stemPath;
+  if (job.separationMode === "vocals") {
+    const vocalsPath = path.join(modelDir, "vocals.wav");
+    const noVocalsPath = path.join(modelDir, "no_vocals.wav");
+    const accompanimentPath = path.join(modelDir, "accompaniment.wav");
+    const otherPath = path.join(modelDir, "other.wav");
+    const candidates = [
+      ["vocals", vocalsPath],
+      ["other", noVocalsPath],
+      ["other", accompanimentPath],
+      ["other", otherPath],
+    ];
+    for (const [key, filePath] of candidates) {
+      try {
+        const statResult = await stat(filePath);
+        if (statResult.isFile()) {
+          stems[key] = filePath;
+        }
+      } catch (e) {
+        console.error(`Stem not found: ${key}`);
       }
-    } catch (e) {
-      console.error(`Stem not found: ${stem}`);
+    }
+  } else {
+    for (const stem of ["vocals", "drums", "bass", "other", "guitar", "piano"]) {
+      const stemPath = path.join(modelDir, `${stem}.wav`);
+      try {
+        const statResult = await stat(stemPath);
+        if (statResult.isFile()) {
+          stems[stem] = stemPath;
+        }
+      } catch (e) {
+        console.error(`Stem not found: ${stem}`);
+      }
     }
   }
 
@@ -276,6 +315,36 @@ async function runDemucs(job) {
   scheduleCleanup(job);
 
   return stems;
+}
+
+function processNextJob() {
+  if (activeJob || pendingJobs.length === 0) {
+    return;
+  }
+
+  const nextJobId = pendingJobs.shift();
+  const job = jobs.get(nextJobId);
+  if (!job) {
+    processNextJob();
+    return;
+  }
+
+  activeJob = nextJobId;
+  job.status = "processing";
+  job.progress = Math.max(job.progress, 1);
+
+  runDemucs(job)
+    .catch((err) => {
+      const currentJob = jobs.get(nextJobId);
+      if (currentJob) {
+        currentJob.status = "error";
+        currentJob.error = err.message;
+      }
+    })
+    .finally(() => {
+      activeJob = null;
+      processNextJob();
+    });
 }
 
 function scheduleCleanup(job) {
@@ -296,6 +365,26 @@ function scheduleCleanup(job) {
       }
     }
   }, delay);
+}
+
+async function resolveDemucsCommand() {
+  if (resolvedDemucsCommand) {
+    return resolvedDemucsCommand;
+  }
+
+  for (const command of DEMUCS_CANDIDATES) {
+    try {
+      const result = await runCommand(command, ["--help"], 5000);
+      if (result.code === 0) {
+        resolvedDemucsCommand = command;
+        return command;
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+
+  throw new Error("未找到可用的 Demucs 命令，请安装 Demucs 或设置环境变量 DEMUCS");
 }
 
 async function cleanupDir(dirPath) {
@@ -340,63 +429,241 @@ function runCommand(command, args, timeoutMs) {
   });
 }
 
-function readRequestBody(request, maxBytes) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let size = 0;
-
-    request.on("data", (chunk) => {
-      size += chunk.length;
-      if (size > maxBytes) {
-        reject(new Error("上传文件过大。"));
-        request.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-
-    request.on("end", () => resolve(Buffer.concat(chunks)));
-    request.on("error", reject);
-  });
-}
-
-async function extractMultipartFile(body, boundary) {
-  const boundaryText = `--${boundary}`;
-  const sections = body.toString("latin1").split(boundaryText);
-
-  for (const section of sections) {
-    if (!section.includes('name="file"')) {
-      continue;
-    }
-
-    const headerEnd = section.indexOf("\r\n\r\n");
-    if (headerEnd < 0) {
-      continue;
-    }
-
-    const headers = section.slice(0, headerEnd);
-    const fileName = headers.match(/filename="([^"]+)"/)?.[1] || "upload.audio";
-    const safeName = path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, "_");
-    const content = section.slice(headerEnd + 4).replace(/\r\n--$/, "").replace(/\r\n$/, "");
-    const target = path.join(UPLOAD_DIR, `${Date.now()}-${safeName}`);
-
-    await writeFileFromLatin1(target, content);
-    return { path: target, fileName: safeName };
+function normalizeModel(requestedModel) {
+  const modelIds = new Set(AVAILABLE_MODELS.map((item) => item.id));
+  if (requestedModel && modelIds.has(requestedModel)) {
+    return requestedModel;
   }
-
-  return null;
-}
-
-async function extractModelFromBody(body) {
   return "htdemucs";
 }
 
-function writeFileFromLatin1(target, content) {
+function normalizeSeparationMode(mode) {
+  if (mode === "vocals") {
+    return "vocals";
+  }
+  if (mode === "six") {
+    return "six";
+  }
+  return "four";
+}
+
+function parseMultipartStream(request, boundary, maxBytes) {
   return new Promise((resolve, reject) => {
-    const stream = createWriteStream(target);
-    stream.on("error", reject);
-    stream.on("finish", resolve);
-    stream.end(Buffer.from(content, "latin1"));
+    const boundaryBuf = Buffer.from(`--${boundary}`);
+    const headerSep = Buffer.from("\r\n\r\n");
+    const partEndMarker = Buffer.from(`\r\n--${boundary}`);
+
+    const state = {
+      buffer: Buffer.alloc(0),
+      mode: "seek_boundary",
+      current: null,
+      fields: {},
+      file: null,
+      total: 0,
+      finished: false,
+      rejected: false,
+      processing: false,
+      scheduled: false,
+    };
+
+    const fail = (error) => {
+      if (state.rejected) return;
+      state.rejected = true;
+      if (state.current?.stream) {
+        state.current.stream.destroy();
+      }
+      reject(error);
+    };
+
+    const finishCurrentPart = () => {
+      if (!state.current) {
+        return Promise.resolve();
+      }
+
+      if (state.current.type === "file" && state.current.stream) {
+        return new Promise((partResolve, partReject) => {
+          state.current.stream.on("finish", partResolve);
+          state.current.stream.on("error", partReject);
+          state.current.stream.end();
+        });
+      }
+
+      const value = Buffer.concat(state.current.chunks || []).toString("utf8").trim();
+      state.fields[state.current.name] = value;
+      return Promise.resolve();
+    };
+
+    const parseDisposition = (headersText) => {
+      const name = headersText.match(/name="([^"]+)"/)?.[1] || null;
+      const fileName = headersText.match(/filename="([^"]*)"/)?.[1] || null;
+      return { name, fileName };
+    };
+
+    const processBuffer = async () => {
+      while (!state.finished) {
+        if (state.mode === "seek_boundary") {
+          const idx = state.buffer.indexOf(boundaryBuf);
+          if (idx < 0) {
+            const keep = Math.max(boundaryBuf.length - 1, 0);
+            if (state.buffer.length > keep) {
+              state.buffer = state.buffer.slice(state.buffer.length - keep);
+            }
+            return;
+          }
+
+          state.buffer = state.buffer.slice(idx + boundaryBuf.length);
+          if (state.buffer.slice(0, 2).toString("latin1") === "--") {
+            state.finished = true;
+            return;
+          }
+
+          if (state.buffer.slice(0, 2).toString("latin1") === "\r\n") {
+            state.buffer = state.buffer.slice(2);
+          }
+          state.mode = "headers";
+          continue;
+        }
+
+        if (state.mode === "headers") {
+          const idx = state.buffer.indexOf(headerSep);
+          if (idx < 0) {
+            return;
+          }
+
+          const headersText = state.buffer.slice(0, idx).toString("latin1");
+          state.buffer = state.buffer.slice(idx + headerSep.length);
+
+          const disposition = parseDisposition(headersText);
+          if (!disposition.name) {
+            fail(new Error("无效的 multipart 字段。"));
+            return;
+          }
+
+          if (disposition.name === "file") {
+            const safeName = path
+              .basename(disposition.fileName || "upload.audio")
+              .replace(/[^a-zA-Z0-9._-]/g, "_");
+            const target = path.join(UPLOAD_DIR, `${Date.now()}-${safeName}`);
+            state.current = {
+              type: "file",
+              name: "file",
+              fileName: safeName,
+              path: target,
+              stream: createWriteStream(target),
+            };
+            state.current.stream.on("error", fail);
+          } else {
+            state.current = {
+              type: "field",
+              name: disposition.name,
+              chunks: [],
+            };
+          }
+
+          state.mode = "content";
+          continue;
+        }
+
+        if (state.mode === "content") {
+          const idx = state.buffer.indexOf(partEndMarker);
+          if (idx < 0) {
+            const keep = partEndMarker.length;
+            if (state.buffer.length > keep) {
+              const consumable = state.buffer.slice(0, state.buffer.length - keep);
+              if (state.current?.type === "file") {
+                state.current.stream.write(consumable);
+              } else if (state.current?.type === "field") {
+                state.current.chunks.push(consumable);
+              }
+              state.buffer = state.buffer.slice(state.buffer.length - keep);
+            }
+            return;
+          }
+
+          const contentChunk = state.buffer.slice(0, idx);
+          if (state.current?.type === "file") {
+            state.current.stream.write(contentChunk);
+          } else if (state.current?.type === "field") {
+            state.current.chunks.push(contentChunk);
+          }
+
+          await finishCurrentPart();
+          if (state.current?.type === "file") {
+            state.file = {
+              path: state.current.path,
+              fileName: state.current.fileName,
+            };
+          }
+
+          state.current = null;
+          state.buffer = state.buffer.slice(idx + 2);
+          state.mode = "seek_boundary";
+          continue;
+        }
+      }
+    };
+
+    const scheduleProcess = () => {
+      if (state.processing || state.rejected) {
+        state.scheduled = true;
+        return;
+      }
+
+      state.processing = true;
+      processBuffer()
+        .catch(fail)
+        .finally(() => {
+          state.processing = false;
+          if (state.scheduled && !state.rejected) {
+            state.scheduled = false;
+            scheduleProcess();
+          }
+        });
+    };
+
+    request.on("data", (chunk) => {
+      if (state.rejected) return;
+
+      state.total += chunk.length;
+      if (state.total > maxBytes) {
+        fail(new Error("上传文件过大。"));
+        request.destroy();
+        return;
+      }
+
+      state.buffer = Buffer.concat([state.buffer, chunk]);
+      scheduleProcess();
+    });
+
+    request.on("end", async () => {
+      if (state.rejected) return;
+      try {
+        while (state.processing) {
+          await new Promise((r) => setTimeout(r, 10));
+        }
+        await processBuffer();
+        if (state.current) {
+          await finishCurrentPart();
+          if (state.current.type === "file") {
+            state.file = {
+              path: state.current.path,
+              fileName: state.current.fileName,
+            };
+          }
+        }
+
+        if (!state.file) {
+          reject(new Error("没有找到名为 file 的音频字段。"));
+          return;
+        }
+
+        resolve({ file: state.file, fields: state.fields });
+      } catch (error) {
+        fail(error);
+      }
+    });
+
+    request.on("error", fail);
   });
 }
 

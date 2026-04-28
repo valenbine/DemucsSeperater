@@ -67,3 +67,18 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - 歌曲调性、BPM、拍号使用 `/api/audio-features` 调用 `analyze_audio.py` 的本地分析；`/api/song-meta` 只合并文件名解析与本地分析来源展示，不再调用 Spotify、SongBPM、iTunes 或 MusicBrainz。
   - librosa 用于 BPM 和调性估算；拍号优先使用 Essentia `RhythmExtractor2013(method="multifeature")` 的 beat 序列和重音周期启发式估算，Essentia 不可用或失败时回退到 librosa beat 序列。
   - 浏览器端回退识别逻辑位于 `src/chordino.js`，页面交互位于 `src/main.js`，样式位于 `styles.css`。
+
+### Demucs 主链路与文档偏差
+- Date: 2026-04-28
+- Context: Agent 在执行项目梳理与 README 校对时发现
+- Category: 代码结构
+- Instructions:
+  - 当前主业务链路是 Demucs 分轨，而非 Chordino 和弦识别。
+  - 后端核心接口为 `/api/health`、`/api/models`、`/api/stems`、`/api/status/:jobId`、`/api/download/:jobId/:stem`。
+  - `analyze_audio.py` 与 `src/chordino.js` 在当前版本中不属于分轨主流程，属于历史或扩展能力。
+
+### 专注音频分轨
+- Date: 2026-04-28
+- Context: 用户在项目梳理后明确范围
+- Instructions:
+  - 不再提供或强调 Chordino 相关信息，后续内容专注于 Demucs 音频分轨主链路。

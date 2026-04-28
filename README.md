@@ -1,92 +1,85 @@
-# Chordino Web 和弦识别
+# Demucs Stems Web
 
-这是一个音乐和弦识别 Web 应用。用户上传音频后，后端优先通过 `sonic-annotator` 调用原生 Vamp Chordino 插件输出和弦时间轴；如果后端依赖不可用，前端会自动回退到浏览器端 Chordino 风格 chroma 识别流程。
+这是一个基于 Demucs 的音乐分轨 Web 应用。用户上传音频后，后端调用 `demucs` 将音频分离为人声、鼓组、贝斯和其他轨道，前端提供进度展示、在线试听、音量控制和分轨下载。
 
 ## 功能
 
-- 上传浏览器可解码的音频文件，如 mp3、wav、m4a、ogg
-- 后端调用原生 Vamp Chordino 插件进行分析
-- 提供 `/api/health` 检查 sonic-annotator 和 Chordino 插件状态
-- 后端不可用时自动回退到浏览器端分析
-- 输出主要和弦、和弦片段数量、音频时长
-- 识别完成后展示歌曲调性、BPM、拍号和数据来源
-- 展示 chroma 能量分布和和弦时间轴
-- 支持下载 JSON 识别结果
+- 上传常见音频文件（`mp3`、`wav`、`m4a`、`ogg`、`flac`）
+- 选择 Demucs 模型（`htdemucs`、`htdemucs_ft`、`mdx`、`mdx_q`、`mdx_extra_q`）
+- 后端异步分轨并提供任务状态查询
+- 前端支持单轨播放、全轨播放、静音、音量调节
+- 支持下载单个音轨或全部音轨压缩包
+- 自动清理过期任务产物（默认 1 小时）
 
-## 运行
+## 技术栈
+
+- 后端：Node.js 原生 `http` 服务（`server.js`）
+- 前端：原生 HTML/CSS/JavaScript（`index.html`、`styles.css`、`src/main.js`）
+- 音频分离：Python 工具 `demucs`（通过子进程调用）
+
+## 快速开始
 
 ```bash
-# 启动前后端一体服务
+# 安装 Node.js 依赖
+npm install
+
+# 启动服务
 npm start
 ```
 
-然后访问 `http://127.0.0.1:8000/`。
+启动后访问：`http://127.0.0.1:8000/`
 
-## 后端依赖
+## 运行依赖
 
-原生 Chordino 模式需要当前机器安装：
-
-- `sonic-annotator`
-- Vamp NNLS Chroma/Chordino 插件，通常提供 `vamp:nnls-chroma:chordino:simplechord` 输出
-- Python 依赖 `librosa`，用于本地识别调性和 BPM
-- 可选但推荐的 Python 依赖 `essentia`，用于增强拍号估算；不可用时自动回退到 librosa 启发式估算
-
-当前项目提供了工作区内安装脚本，会下载官方 `sonic-annotator` Linux 64 位包和 Vamp Plugin Pack，并提取 `nnls-chroma.so`：
+后端依赖系统可执行命令 `demucs`。若未安装，可使用：
 
 ```bash
-# 安装 Chordino / NNLS-Chroma 原生工具链
-scripts/setup-chordino.sh
+# 全局安装 Demucs
+pip install --break-system-packages demucs
 ```
 
-安装完成后，`server.js` 默认会使用 `.runtime/tools/sonic-annotator-1.7.0-linux64-static/squashfs-root/usr/bin/sonic-annotator`，并把 `VAMP_PATH` 指向 `.runtime/vamp`。`.runtime/` 不纳入版本控制，可随时通过脚本重新生成。
-
-可以通过环境变量覆盖命令和 transform：
+也可以通过环境变量指定 Demucs 可执行路径：
 
 ```bash
-# 使用自定义 sonic-annotator 路径
-SONIC_ANNOTATOR=/path/to/sonic-annotator npm start
-
-# 使用自定义 Chordino transform
-CHORDINO_TRANSFORM=vamp:nnls-chroma:chordino:simplechord npm start
+# 使用自定义 demucs 路径
+DEMUCS=/path/to/demucs npm start
 ```
 
-健康检查接口：
+## API 概览
 
-```bash
-curl http://127.0.0.1:8000/api/health
+- `GET /api/health`：检查 Demucs 可用性
+- `GET /api/models`：获取可选模型列表
+- `POST /api/stems`：上传音频并创建分轨任务
+- `GET /api/status/:jobId`：查询任务状态与结果
+- `GET /api/download/:jobId/:stem`：下载音轨，`:stem` 支持 `vocals`、`drums`、`bass`、`other`、`all`
+
+## 处理流程
+
+1. 前端将音频文件和模型参数通过 `multipart/form-data` 提交到 `/api/stems`。
+2. 后端写入临时上传目录，创建任务并异步执行 Demucs。
+3. 前端轮询 `/api/status/:jobId` 获取进度与输出结果。
+4. 任务完成后，前端加载分轨音频用于试听和下载。
+5. 到达清理时间后，后端自动删除临时输入和分轨输出。
+
+```mermaid
+flowchart TD
+    A["Upload Audio"] --> B["POST /api/stems"]
+    B --> C["Create Job(jobId)"]
+    C --> D["Run demucs(model)"]
+    D --> E["Write Separated Files"]
+    E --> F["GET /api/status/:jobId"]
+    F --> G["Play and Download Stems"]
 ```
 
-Python 依赖安装：
+## 目录结构
 
-```bash
-# 安装 librosa
-pip install --break-system-packages -r requirements.txt
-```
+- `server.js`：API、任务编排、静态文件服务、压缩下载
+- `src/main.js`：上传交互、状态轮询、音轨播放器控制
+- `index.html`：页面结构
+- `styles.css`：页面样式
+- `.runtime/uploads`：上传临时目录（运行时生成）
+- `.runtime/separated`：Demucs 输出目录（运行时生成）
 
-## 本地音频特征分析
+## 备注
 
-识别完成后，前端会调用 `/api/audio-features` 上传音频，后端通过 `analyze_audio.py` 使用 librosa 和可选 Essentia 分析：
-
-1. 使用 `librosa.beat.beat_track` 估算 BPM。
-2. 使用 `librosa.feature.chroma_cqt` 加 Krumhansl-Schmuckler key profile 匹配估算调性。
-3. 优先使用 `essentia.standard.RhythmExtractor2013(method="multifeature")` 提取 beat 序列和 confidence。
-4. 基于 beat 序列的重音周期在 `3/4`、`4/4`、`6/8` 候选中启发式估算拍号。
-5. 如果 Essentia 未安装或分析失败，自动回退到 librosa beat 序列做拍号估算。
-6. 前端再调用 `/api/song-meta` 合并文件名解析与本地分析来源展示。
-
-说明：Essentia 提供更稳定的 beat/BPM 信息，但当前仍不是专门的 meter detection 模型；拍号会带来源和置信度展示。
-
-项目不再调用 Spotify、SongBPM、iTunes 或 MusicBrainz。
-
-## 识别流程
-
-1. 前端将音频作为 `multipart/form-data` 提交到 `/api/analyze`。
-2. 后端保存上传文件，并执行原生 `sonic-annotator -d vamp:nnls-chroma:chordino:simplechord -w csv --csv-stdout <file>`。
-3. Chordino 使用 NNLS Chroma 和默认 HMM/Viterbi 平滑输出和弦估计，后端解析 CSV 并返回统一 JSON，包括 `mainChord`、`duration`、`timeline` 和 `globalChroma`。
-4. 前端调用 `/api/audio-features` 用 librosa 本地分析调性和 BPM，并优先用 Essentia 增强拍号估算。
-5. 前端调用 `/api/song-meta` 合并文件名解析与本地分析来源信息。
-6. 如果 `/api/analyze` 返回依赖缺失或执行错误，前端使用 Web Audio 与 chroma 模板匹配流程回退识别。
-
-## 说明
-
-当前仓库不自动安装系统级音频分析依赖。若 `sonic-annotator` 或 Chordino 插件缺失，页面会展示后端不可用状态，并继续使用浏览器端回退算法。
+- 若 `demucs` 不可用，`/api/health` 会返回错误信息，页面会提示服务不可用。
