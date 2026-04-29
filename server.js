@@ -70,7 +70,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Demucs Stems server listening on http://127.0.0.1:${PORT}`);
+  console.log(`DemucsSeparater server listening on http://127.0.0.1:${PORT}`);
 });
 
 async function handleHealth(request, response) {

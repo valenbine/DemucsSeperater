@@ -440,6 +440,53 @@ button:disabled {
   font-size: 0.82rem;
 }
 
+.poll-debug-wrap {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.07);
+  padding: 16px 18px;
+}
+
+.poll-debug {
+  margin-top: 12px;
+  min-height: 72px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+  text-align: left;
+}
+
+.poll-debug-toggle {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.poll-debug-toggle:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.poll-debug__title {
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.poll-debug__line {
+  margin-top: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: normal;
+  word-break: break-word;
+}
+
 .mixer-controls {
   display: flex;
   align-items: center;

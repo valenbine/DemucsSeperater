@@ -7,7 +7,7 @@
       name="description"
       content="基于 Demucs V4 的浏览器端音乐源分离 Web 应用，可将音乐分离为人声、鼓组、贝斯、其他乐器等独立音轨。"
     />
-    <title>Demucs Stems 音乐分轨</title>
+    <title>DemucsSeparater 音乐分轨</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -137,6 +137,13 @@
             <div>
               <span class="metric" id="model-used">--</span>
               <span class="metric-label">使用模型</span>
+            </div>
+          </div>
+          <div class="poll-debug-wrap" aria-label="调试信息">
+            <button class="poll-debug-toggle" id="poll-debug-toggle" type="button">显示调试反馈</button>
+            <div class="poll-debug" id="poll-debug" hidden>
+              <div class="poll-debug__title">调试轮询反馈</div>
+              <div class="poll-debug__line" id="poll-debug-line">等待任务开始</div>
             </div>
           </div>
         </div>

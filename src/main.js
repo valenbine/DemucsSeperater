@@ -26,9 +26,13 @@ const progressBar = document.querySelector("#progress-bar");
 const fileName = document.querySelector("#file-name");
 const fileDuration = document.querySelector("#file-duration");
 const modelUsed = document.querySelector("#model-used");
+const pollDebug = document.querySelector("#poll-debug");
+const pollDebugLine = document.querySelector("#poll-debug-line");
+const pollDebugToggle = document.querySelector("#poll-debug-toggle");
 const stemsLoadStatus = document.querySelector("#stems-load-status");
 const masterProgress = document.querySelector("#master-progress");
 const USE_BUFFER_PLAYBACK = true;
+let debugPollingEnabled = new URLSearchParams(window.location.search).get("debug") === "1";
 
 let selectedFile = null;
 let currentJobId = null;
@@ -68,6 +72,14 @@ function initAudioContext() {
 
 checkHealth();
 loadModels();
+setupDebugPanel();
+
+if (pollDebugToggle) {
+  pollDebugToggle.addEventListener("click", () => {
+    debugPollingEnabled = !debugPollingEnabled;
+    setupDebugPanel();
+  });
+}
 
 separationModeSelect.addEventListener("change", () => {
   applyModelModeRules("mode");
@@ -299,6 +311,9 @@ async function startSeparation() {
   if (!selectedFile) return;
 
   setBusy(true);
+  if (debugPollingEnabled && pollDebugLine) {
+    pollDebugLine.textContent = "任务已创建，准备开始轮询";
+  }
   currentJobId = null;
   modelUsed.textContent = modelSelect.options[modelSelect.selectedIndex]?.text.split(" ")[0] || "htdemucs";
   resetStemStates();
@@ -346,23 +361,27 @@ async function pollJobStatus(jobId) {
       const status = await response.json();
 
       if (status.status === "completed") {
+        updateDebugPolling(status, attempts + 1);
         handleCompletion(jobId, status);
         return;
       }
 
       if (status.status === "error") {
+        updateDebugPolling(status, attempts + 1);
         setStatus("处理失败", "Error", status.error || "分轨处理失败。", 0, true);
         setBusy(false);
         return;
       }
 
       if (status.status === "queued") {
+        updateDebugPolling(status, attempts + 1);
         setStatus("排队中", "Queued", "当前任务正在排队，稍后会自动开始处理。", 6);
         attempts++;
         setTimeout(poll, 1200);
         return;
       }
 
+      updateDebugPolling(status, attempts + 1);
       const progress = Math.min(status.progress || 10, 95);
       setStatus("处理中", "Processing", `正在使用 ${status.model || "htdemucs"} 模型分离音轨...`, progress);
       attempts++;
@@ -1005,6 +1024,16 @@ function setStemLoadStatus(message, isError = false) {
   if (!stemsLoadStatus) return;
   stemsLoadStatus.textContent = message;
   stemsLoadStatus.classList.toggle("is-error", isError);
+  updateDebugCacheStatus(message, isError);
+}
+
+function updateDebugCacheStatus(message, isError = false) {
+  if (!debugPollingEnabled || !pollDebugLine) {
+    return;
+  }
+  const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  const tag = isError ? "缓存错误" : "缓存状态";
+  pollDebugLine.textContent = `${tag} | 时间=${time} | ${message}`;
 }
 
 function seekToProgress() {
@@ -1034,6 +1063,31 @@ function setBusy(isBusy) {
   input.disabled = isBusy;
   modelSelect.disabled = isBusy;
   separationModeSelect.disabled = isBusy;
+}
+
+function setupDebugPanel() {
+  if (!pollDebug || !pollDebugLine || !pollDebugToggle) {
+    return;
+  }
+  if (debugPollingEnabled) {
+    pollDebug.hidden = false;
+    pollDebugToggle.textContent = "隐藏调试反馈";
+    pollDebugLine.textContent = "调试模式已开启，等待轮询结果";
+  } else {
+    pollDebug.hidden = true;
+    pollDebugToggle.textContent = "显示调试反馈";
+  }
+}
+
+function updateDebugPolling(status, attempt) {
+  if (!debugPollingEnabled || !pollDebugLine) {
+    return;
+  }
+  const state = status?.status || "unknown";
+  const progress = Number.isFinite(status?.progress) ? Math.max(0, Math.min(100, status.progress)) : 0;
+  const message = status?.message || "无";
+  const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  pollDebugLine.textContent = `状态=${state} | 进度=${progress}% | 轮询=${attempt} | 时间=${time} | 消息=${message}`;
 }
 
 function updateStemVisibility(mode, availableStems = []) {

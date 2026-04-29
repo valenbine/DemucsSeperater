@@ -82,3 +82,15 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
 - Context: 用户在项目梳理后明确范围
 - Instructions:
   - 不再提供或强调 Chordino 相关信息，后续内容专注于 Demucs 音频分轨主链路。
+
+### 调试信息展示边界
+- Date: 2026-04-29
+- Context: 用户要求在页面展示轮询反馈时明确限制
+- Instructions:
+  - 调试模式的页面反馈可展示轮询状态与进度，但不要展示模型名称等后端关键技术架构信息。
+
+### 项目命名统一
+- Date: 2026-04-29
+- Context: 用户要求统一项目名称
+- Instructions:
+  - 项目名称统一使用 `DemucsSeparater`。

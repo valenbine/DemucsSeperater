@@ -2,7 +2,7 @@
 
 ## 1. 描述
 
-项目名称: Demucs Stems Web
+项目名称: DemucsSeparater
 功能: 基于 Demucs V4 的音乐源分离 Web 应用
 技术栈: Node.js (后端) + 原生 HTML/CSS/JS (前端)
 风格: 沿用 Chordino Web 深色霓虹主题

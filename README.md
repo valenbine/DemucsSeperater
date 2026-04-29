@@ -1,4 +1,4 @@
-# Demucs Stems Web
+# DemucsSeparater
 
 这是一个基于 Demucs 的音乐分轨 Web 应用。用户上传音频后，后端调用 `demucs` 将音频分离为人声、鼓组、贝斯和其他轨道，前端提供进度展示、在线试听、音量控制和分轨下载。
 
