@@ -15,7 +15,7 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DisableProgramGroupPage=yes
 LicenseFile=
-OutputDir=dist
+OutputDir=..\dist
 OutputBaseFilename=DemucsSeperater-Setup-x64
 Compression=lzma
 SolidCompression=yes
@@ -29,8 +29,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Files]
-Source: "dist\DemucsSeperater.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\DemucsSeperater.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
