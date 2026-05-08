@@ -7,9 +7,11 @@ import { fileURLToPath } from "node:url";
 import archiver from "archiver";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const APP_ROOT = process.pkg ? path.join(process.cwd(), "assets") : __dirname;
 const PORT = Number(process.env.PORT || 8000);
-const UPLOAD_DIR = path.join(__dirname, ".runtime", "uploads");
-const SEPARATED_DIR = path.join(__dirname, ".runtime", "separated");
+const RUNTIME_ROOT = process.pkg ? path.join(process.cwd(), ".runtime") : path.join(__dirname, ".runtime");
+const UPLOAD_DIR = path.join(RUNTIME_ROOT, "uploads");
+const SEPARATED_DIR = path.join(RUNTIME_ROOT, "separated");
 const DEMUCS = process.env.DEMUCS || "demucs";
 const MAX_UPLOAD_BYTES = 120 * 1024 * 1024;
 const AUTO_DELETE_HOURS = 1;
@@ -352,7 +354,7 @@ async function cleanupDir(dirPath) {
 
 function runCommand(command, args, timeoutMs) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd: __dirname, env: { ...process.env } });
+    const child = spawn(command, args, { cwd: APP_ROOT, env: { ...process.env } });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
@@ -441,9 +443,9 @@ async function serveStatic(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`);
   const requestedPath = url.pathname === "/" ? "/index.html" : url.pathname;
   const normalized = path.normalize(decodeURIComponent(requestedPath)).replace(/^(\.\.[/\\])+/, "");
-  const filePath = path.join(__dirname, normalized);
+  const filePath = path.join(APP_ROOT, normalized);
 
-  if (!filePath.startsWith(__dirname)) {
+  if (!filePath.startsWith(APP_ROOT)) {
     response.writeHead(403);
     response.end("Forbidden");
     return;
