@@ -151,7 +151,20 @@
               <span class="btn-text">静音</span>
             </button>
           </div>
-          <div class="master-time" id="master-time">0:00 / 0:00</div>
+          <div class="master-progress-wrap">
+            <input
+              type="range"
+              id="master-progress"
+              class="master-progress"
+              min="0"
+              max="1000"
+              value="0"
+              step="1"
+              disabled
+              aria-label="播放进度"
+            />
+            <div class="master-time" id="master-time">0:00 / 0:00</div>
+          </div>
         </div>
 
         <div class="stems-grid" id="stems-grid">
@@ -228,6 +241,19 @@
 
         
       </section>
+
+      <footer class="app-author" aria-label="作者信息">
+        <p>
+          作者：<strong>猫仙森MRCAT</strong>
+          <span class="author-sep">|</span>
+          邮箱：<a href="mailto:valnebine@163.com">valnebine@163.com</a>
+          <span class="author-sep">|</span>
+          仓库：
+          <a href="https://github.com/valenbine/DemucsSeperater" target="_blank" rel="noreferrer noopener">
+            github.com/valenbine/DemucsSeperater
+          </a>
+        </p>
+      </footer>
     </main>
 
     <script type="module" src="./src/main.js"></script>

@@ -170,6 +170,8 @@ async function handleStatus(request, response, jobId) {
 }
 
 async function handleDownload(request, response, jobId, stem) {
+  const requestUrl = new URL(request.url, `http://${request.headers.host}`);
+  const forceDownload = requestUrl.searchParams.get("download") === "1";
   const job = jobs.get(jobId);
 
   if (!job || job.status !== "completed") {
@@ -180,7 +182,7 @@ async function handleDownload(request, response, jobId, stem) {
   }
 
   if (stem === "all") {
-    return serveAllStemsZip(response, job);
+    return serveAllStemsZip(response, job, forceDownload);
   }
 
   const filePath = job.stems[stem];
@@ -199,21 +201,56 @@ async function handleDownload(request, response, jobId, stem) {
     });
   }
 
+  const rangeHeader = request.headers.range;
+  if (rangeHeader) {
+    const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+    if (!match) {
+      response.writeHead(416, {
+        "Content-Range": `bytes */${fileStat.size}`,
+      });
+      response.end();
+      return;
+    }
+
+    const start = match[1] ? Number(match[1]) : 0;
+    const end = match[2] ? Number(match[2]) : fileStat.size - 1;
+
+    if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= fileStat.size) {
+      response.writeHead(416, {
+        "Content-Range": `bytes */${fileStat.size}`,
+      });
+      response.end();
+      return;
+    }
+
+    response.writeHead(206, {
+      "Content-Type": "audio/wav",
+      "Content-Disposition": `${forceDownload ? "attachment" : "inline"}; filename="${stem}.wav"`,
+      "Accept-Ranges": "bytes",
+      "Content-Range": `bytes ${start}-${end}/${fileStat.size}`,
+      "Content-Length": end - start + 1,
+    });
+
+    createReadStream(filePath, { start, end }).pipe(response);
+    return;
+  }
+
   response.writeHead(200, {
     "Content-Type": "audio/wav",
-    "Content-Disposition": `attachment; filename="${stem}.wav"`,
+    "Content-Disposition": `${forceDownload ? "attachment" : "inline"}; filename="${stem}.wav"`,
+    "Accept-Ranges": "bytes",
     "Content-Length": fileStat.size,
   });
 
   createReadStream(filePath).pipe(response);
 }
 
-async function serveAllStemsZip(response, job) {
+async function serveAllStemsZip(response, job, forceDownload = true) {
   const archive = archiver("zip", { zlib: { level: 9 } });
 
   response.writeHead(200, {
     "Content-Type": "application/zip",
-    "Content-Disposition": `attachment; filename="stems_${job.id}.zip"`,
+    "Content-Disposition": `${forceDownload ? "attachment" : "inline"}; filename="stems_${job.id}.zip"`,
   });
 
   archive.pipe(response);
