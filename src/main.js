@@ -12,15 +12,18 @@ const progressBar = document.querySelector("#progress-bar");
 const fileName = document.querySelector("#file-name");
 const fileDuration = document.querySelector("#file-duration");
 const modelUsed = document.querySelector("#model-used");
+const masterProgress = document.querySelector("#master-progress");
 
 let selectedFile = null;
 let currentJobId = null;
 let stemAudios = {};
 let stemGains = {};
+let stemSources = {};
 let masterGain = null;
 let allPlaying = false;
 let isAllMuted = false;
 let audioContext = null;
+let isSeeking = false;
 
 function initAudioContext() {
   if (!audioContext) {
@@ -29,6 +32,19 @@ function initAudioContext() {
     masterGain.connect(audioContext.destination);
   }
   return audioContext;
+}
+
+async function ensureAudioContextRunning() {
+  const ctx = initAudioContext();
+  if (ctx.state !== "running") {
+    await ctx.resume();
+  }
+}
+
+function reportPlaybackError(prefix, error) {
+  const reason = error?.message || String(error || "未知错误");
+  console.error(prefix, error);
+  setStatus("播放失败", "Error", `${prefix}: ${reason}`, 100, true);
 }
 
 checkHealth();
@@ -67,12 +83,20 @@ form.addEventListener("submit", async (event) => {
 
 downloadAllButton.addEventListener("click", () => {
   if (!currentJobId) return;
-  window.location.href = `/api/download/${currentJobId}/all`;
+  window.location.href = `/api/download/${currentJobId}/all?download=1`;
 });
 
 document.getElementById("play-all-btn").addEventListener("click", playAllStems);
 document.getElementById("stop-all-btn").addEventListener("click", stopAllStems);
 document.getElementById("mute-all-btn").addEventListener("click", toggleMuteAll);
+masterProgress.addEventListener("input", () => {
+  isSeeking = true;
+  syncProgressToAudios();
+});
+masterProgress.addEventListener("change", () => {
+  syncProgressToAudios();
+  isSeeking = false;
+});
 
 document.querySelectorAll(".stem-mute").forEach((btn) => {
   btn.addEventListener("click", () => toggleMute(btn.dataset.stem));
@@ -277,6 +301,7 @@ function handleCompletion(jobId, status) {
     downloadAllButton.disabled = false;
     document.getElementById("play-all-btn").disabled = false;
     document.getElementById("stop-all-btn").disabled = false;
+    masterProgress.disabled = false;
   } else {
     setStatus("分离完成", "Warning", "未能获取部分音轨文件，请刷新重试。", 100, true);
   }
@@ -295,15 +320,18 @@ function enableStemControls(stemName, jobId) {
 
   const audio = new Audio();
   audio.crossOrigin = "anonymous";
+  audio.preload = "auto";
   const gainNode = audioContext.createGain();
+  const sourceNode = audioContext.createMediaElementSource(audio);
   gainNode.gain.value = 0.8;
 
   audio.src = `/api/download/${jobId}/${stemName}`;
-  audio.connect(gainNode);
+  sourceNode.connect(gainNode);
   gainNode.connect(masterGain);
 
   stemAudios[stemName] = audio;
   stemGains[stemName] = gainNode;
+  stemSources[stemName] = sourceNode;
 
   loadWaveformData(stemName).then((data) => {
     const canvas = document.getElementById(`canvas-${stemName}`);
@@ -317,6 +345,11 @@ function enableStemControls(stemName, jobId) {
   });
 
   audio.addEventListener("timeupdate", updateMasterTime);
+  audio.addEventListener("error", () => {
+    const mediaError = audio.error;
+    const detail = mediaError ? `媒体错误码 ${mediaError.code}` : "媒体加载失败";
+    reportPlaybackError(`音轨 ${stemName} 无法播放`, new Error(detail));
+  });
 }
 
 async function loadWaveformData(stemName) {
@@ -348,10 +381,33 @@ async function loadWaveformData(stemName) {
   }
 }
 
-function playAllStems() {
+async function playAllStems() {
+  const hasAnyPlaying = Object.values(stemAudios).some((audio) => !audio.paused);
+
+  if (hasAnyPlaying) {
+    Object.values(stemAudios).forEach((audio) => {
+      audio.pause();
+    });
+    allPlaying = false;
+    updatePlayAllButton();
+    updatePlayButtons();
+    return;
+  }
+
+  try {
+    await ensureAudioContextRunning();
+  } catch (error) {
+    reportPlaybackError("音频上下文启动失败", error);
+    return;
+  }
+
+  const currentTime = getMasterCurrentTime();
+
   Object.entries(stemAudios).forEach(([stemName, audio]) => {
-    audio.currentTime = 0;
-    audio.play();
+    audio.currentTime = currentTime;
+    audio.play().catch((error) => {
+      reportPlaybackError(`音轨 ${stemName} 播放失败`, error);
+    });
   });
   allPlaying = true;
   updatePlayAllButton();
@@ -363,7 +419,10 @@ function stopAllStems() {
     audio.currentTime = 0;
   });
   allPlaying = false;
+  masterProgress.value = "0";
   updatePlayAllButton();
+  updatePlayButtons();
+  updateMasterTime();
 }
 
 function toggleMuteAll() {
@@ -426,13 +485,13 @@ function setVolume(stemName, value) {
 
 function updatePlayAllButton() {
   const playBtn = document.getElementById("play-all-btn");
-  if (allPlaying) {
-    playBtn.querySelector(".btn-icon").textContent = "▶";
-    playBtn.querySelector(".btn-text").textContent = "继续";
+  if (Object.values(stemAudios).some((audio) => !audio.paused)) {
+    playBtn.querySelector(".btn-icon").textContent = "⏸";
+    playBtn.querySelector(".btn-text").textContent = "暂停";
     playBtn.classList.add("is-active");
   } else {
     playBtn.querySelector(".btn-icon").textContent = "▶";
-    playBtn.querySelector(".btn-text").textContent = "播放全部";
+    playBtn.querySelector(".btn-text").textContent = "播放";
     playBtn.classList.remove("is-active");
   }
 }
@@ -443,22 +502,54 @@ function updateMasterTime() {
   const durations = Object.values(stemAudios).map((a) => a.duration || 0);
   const maxDuration = Math.max(...durations);
 
+  if (!isSeeking && maxDuration > 0) {
+    masterProgress.value = String(Math.round((maxTime / maxDuration) * 1000));
+  }
+
   document.getElementById("master-time").textContent =
     `${formatTime(maxTime)} / ${formatTime(maxDuration)}`;
+
+  updatePlayAllButton();
+  updatePlayButtons();
 }
 
-function toggleStemPlayback(stemName) {
+async function toggleStemPlayback(stemName) {
   const audio = stemAudios[stemName];
   if (!audio) return;
 
   if (audio.paused) {
-    audio.play();
+    try {
+      await ensureAudioContextRunning();
+      await audio.play();
+    } catch (error) {
+      reportPlaybackError(`音轨 ${stemName} 播放失败`, error);
+      return;
+    }
   } else {
     audio.pause();
-    audio.currentTime = 0;
   }
 
   updatePlayButtons();
+}
+
+function syncProgressToAudios() {
+  const durations = Object.values(stemAudios).map((a) => a.duration || 0);
+  const maxDuration = Math.max(...durations);
+  if (!maxDuration || maxDuration <= 0) {
+    return;
+  }
+
+  const targetTime = (Number(masterProgress.value) / 1000) * maxDuration;
+  Object.values(stemAudios).forEach((audio) => {
+    audio.currentTime = targetTime;
+  });
+  updateMasterTime();
+}
+
+function getMasterCurrentTime() {
+  const times = Object.values(stemAudios).map((a) => a.currentTime || 0);
+  const maxTime = Math.max(...times);
+  return Number.isFinite(maxTime) ? maxTime : 0;
 }
 
 function updatePlayButtons() {
@@ -477,7 +568,7 @@ function updatePlayButtons() {
 
 function downloadStem(stemName) {
   if (!currentJobId) return;
-  window.location.href = `/api/download/${currentJobId}/${stemName}`;
+  window.location.href = `/api/download/${currentJobId}/${stemName}?download=1`;
 }
 
 function resetStemStates() {
@@ -494,8 +585,15 @@ function resetStemStates() {
     }
   });
 
+  Object.values(stemSources).forEach((source) => {
+    if (source) {
+      source.disconnect();
+    }
+  });
+
   stemAudios = {};
   stemGains = {};
+  stemSources = {};
   allPlaying = false;
   isAllMuted = false;
 
@@ -523,6 +621,8 @@ function resetStemStates() {
   muteBtn.querySelector(".btn-text").textContent = "静音";
 
   downloadAllButton.disabled = true;
+  masterProgress.disabled = true;
+  masterProgress.value = "0";
   document.getElementById("master-time").textContent = "0:00 / 0:00";
 }
 

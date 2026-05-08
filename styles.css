@@ -437,6 +437,7 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 14px;
   padding: 16px 20px;
   margin-bottom: 20px;
   border: 1px solid var(--line);
@@ -498,6 +499,49 @@ button:disabled {
   padding: 8px 16px;
   background: rgba(255, 255, 255, 0.08);
   border-radius: 12px;
+}
+
+.master-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 320px;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.master-progress {
+  width: min(420px, 100%);
+  height: 8px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+
+.master-progress:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.master-progress::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  cursor: pointer;
+}
+
+.master-progress::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  cursor: pointer;
 }
 
 .stem-card__header {
@@ -633,6 +677,36 @@ button:disabled {
   max-width: 400px;
 }
 
+.app-author {
+  margin-top: 30px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 12px 16px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.app-author p {
+  margin: 0;
+}
+
+.app-author a {
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.app-author a:hover {
+  text-decoration: underline;
+}
+
+.author-sep {
+  margin: 0 8px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
 .is-error {
   color: var(--danger);
 }
@@ -663,6 +737,17 @@ button:disabled {
   .summary-grid {
     grid-template-columns: 1fr;
   }
+
+  .mixer-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .master-progress-wrap {
+    min-width: 0;
+    width: 100%;
+    justify-content: stretch;
+  }
 }
 
 @media (max-width: 560px) {
@@ -680,6 +765,20 @@ button:disabled {
 
   .stems-grid {
     grid-template-columns: 1fr;
+  }
+
+  .author-sep {
+    display: none;
+  }
+
+  .app-author {
+    text-align: left;
+    font-size: 0.88rem;
+  }
+
+  .app-author p {
+    display: grid;
+    gap: 4px;
   }
 }
 
