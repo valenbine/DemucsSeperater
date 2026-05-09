@@ -14,7 +14,9 @@ if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 >> "%LOG_FILE%" echo LOCALAPPDATA=%LOCALAPPDATA%
 
 set "PATH=%APP_DIR%bin;%PATH%"
+set "FFMPEG_BINARY=%APP_DIR%bin\ffmpeg.exe"
 >> "%LOG_FILE%" echo BUNDLED_FFMPEG=%APP_DIR%bin\ffmpeg.exe
+>> "%LOG_FILE%" echo FFMPEG_BINARY=%FFMPEG_BINARY%
 
 "%APP_DIR%DemucsSeperater.exe" >> "%LOG_FILE%" 2>&1
 set "EXIT_CODE=%ERRORLEVEL%"
