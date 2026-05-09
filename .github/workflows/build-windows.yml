@@ -69,11 +69,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist\bin | Out-Null
-          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "dist\ffmpeg.zip"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.zip" -OutFile "dist\ffmpeg.zip"
           Expand-Archive -Path "dist\ffmpeg.zip" -DestinationPath "dist\ffmpeg" -Force
-          $ffmpeg = Get-ChildItem -Path "dist\ffmpeg" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
-          if (-not $ffmpeg) { throw "ffmpeg.exe was not found in downloaded archive" }
-          Copy-Item $ffmpeg.FullName "dist\bin\ffmpeg.exe" -Force
+          $ffmpegBin = Get-ChildItem -Path "dist\ffmpeg" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1 | ForEach-Object { $_.Directory.FullName }
+          if (-not $ffmpegBin) { throw "ffmpeg.exe was not found in downloaded archive" }
+          Copy-Item "$ffmpegBin\*" "dist\bin" -Recurse -Force
+          if (-not (Test-Path "dist\bin\avcodec-*.dll")) { throw "FFmpeg shared DLLs were not found in bundled bin directory" }
           & "dist\bin\ffmpeg.exe" -version
 
       - name: Package artifact
