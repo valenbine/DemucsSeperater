@@ -22,6 +22,7 @@ const UPLOAD_DIR = path.join(RUNTIME_ROOT, "uploads");
 const SEPARATED_DIR = path.join(RUNTIME_ROOT, "separated");
 const LOG_DIR = path.join(APP_DATA_ROOT, "logs");
 const LOG_FILE = path.join(LOG_DIR, "app.log");
+const TORCH_HOME = process.env.TORCH_HOME || path.join(APP_DATA_ROOT, "torch");
 const DEMUCS = process.env.DEMUCS || "demucs";
 const MAX_UPLOAD_BYTES = 120 * 1024 * 1024;
 const AUTO_DELETE_HOURS = 1;
@@ -43,6 +44,7 @@ console.log(`[Startup] cwd=${process.cwd()}`);
 console.log(`[Startup] appRoot=${APP_ROOT}`);
 console.log(`[Startup] runtimeRoot=${RUNTIME_ROOT}`);
 console.log(`[Startup] logFile=${LOG_FILE}`);
+console.log(`[Startup] torchHome=${TORCH_HOME}`);
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -102,6 +104,7 @@ async function startServer() {
   try {
     await mkdirAsync(UPLOAD_DIR, { recursive: true });
     await mkdirAsync(SEPARATED_DIR, { recursive: true });
+    await mkdirAsync(TORCH_HOME, { recursive: true });
   } catch (error) {
     console.error("Startup directory initialization failed:", error);
     if (process.pkg) {
@@ -460,7 +463,7 @@ async function cleanupDir(dirPath) {
 
 function runCommand(command, args, timeoutMs) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd: APP_ROOT, env: { ...process.env } });
+    const child = spawn(command, args, { cwd: APP_ROOT, env: { ...process.env, TORCH_HOME } });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
