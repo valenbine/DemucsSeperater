@@ -51,12 +51,14 @@ jobs:
           cp requirements.txt dist/assets/
           cp -r src dist/assets/src
           cp -r scripts dist/assets/scripts
+          cp packaging/windows/DemucsSeperater-Launcher.cmd dist/
+          cp packaging/windows/DemucsSeperater-Launcher.vbs dist/
 
       - name: Package artifact
         shell: bash
         run: |
           cd dist
-          powershell -Command "Compress-Archive -Path DemucsSeperater.exe,assets -DestinationPath DemucsSeperater-windows-x64.zip -Force"
+          powershell -Command "Compress-Archive -Path DemucsSeperater.exe,DemucsSeperater-Launcher.cmd,DemucsSeperater-Launcher.vbs,assets -DestinationPath DemucsSeperater-windows-x64.zip -Force"
 
       - name: Build installer with Inno Setup
         run: choco install innosetup -y
