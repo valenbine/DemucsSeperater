@@ -25,19 +25,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Prepare package metadata for pkg
+      - name: Install build tools globally
+        run: npm install -g pkg esbuild
+
+      - name: Bundle server entrypoint
         shell: bash
         run: |
-          node -e "const fs=require('fs');const p=require('./package.json');p.bin='server.js';p.pkg=p.pkg||{};p.pkg.assets=['index.html','styles.css','src/**/*','scripts/**/*','analyze_audio.py','requirements.txt'];fs.writeFileSync('package.json', JSON.stringify(p,null,2));"
-
-      - name: Install pkg globally
-        run: npm install -g pkg
+          mkdir -p dist/pkg
+          esbuild server.js \
+            --bundle \
+            --platform=node \
+            --format=cjs \
+            --target=node18 \
+            --outfile=dist/pkg/server.cjs
 
       - name: Build Windows executable
         shell: bash
         run: |
           mkdir -p dist
-          pkg . \
+          pkg dist/pkg/server.cjs \
             --targets node18-win-x64 \
             --output dist/DemucsSeperater.exe
 
