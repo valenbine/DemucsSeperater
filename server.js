@@ -83,6 +83,14 @@ const server = http.createServer(async (request, response) => {
 
 server.on("error", (error) => {
   console.error("Server listen error:", error);
+  if (error?.code === "EADDRINUSE") {
+    console.error(`[Startup] Port ${PORT} is already in use. Opening the existing app URL.`);
+    if (process.pkg && process.env.NO_AUTO_OPEN !== "1") {
+      openBrowser(`http://127.0.0.1:${PORT}`);
+    }
+    setTimeout(() => process.exit(0), 2000);
+    return;
+  }
   if (process.pkg) {
     setTimeout(() => process.exit(1), 5000);
   }
@@ -102,7 +110,7 @@ async function startServer() {
     return;
   }
 
-  server.listen(PORT, "0.0.0.0", () => {
+  server.listen(PORT, "127.0.0.1", () => {
     console.log(`Demucs Stems server listening on http://127.0.0.1:${PORT}`);
     if (process.pkg && process.env.NO_AUTO_OPEN !== "1") {
       openBrowser(`http://127.0.0.1:${PORT}`);
@@ -136,21 +144,32 @@ function setupFileLogging() {
 function openBrowser(url) {
   try {
     if (process.platform === "win32") {
-      const command = `start "" "${url}"`;
-      spawn("cmd", ["/c", command], {
+      const child = spawn("explorer.exe", [url], {
         detached: true,
         stdio: "ignore",
         windowsHide: true,
-      }).unref();
+      });
+      child.on("error", (error) => {
+        console.error("Failed to auto-open browser child process:", error);
+      });
+      child.unref();
       return;
     }
 
     if (process.platform === "darwin") {
-      spawn("open", [url], { detached: true, stdio: "ignore" }).unref();
+      const child = spawn("open", [url], { detached: true, stdio: "ignore" });
+      child.on("error", (error) => {
+        console.error("Failed to auto-open browser child process:", error);
+      });
+      child.unref();
       return;
     }
 
-    spawn("xdg-open", [url], { detached: true, stdio: "ignore" }).unref();
+    const child = spawn("xdg-open", [url], { detached: true, stdio: "ignore" });
+    child.on("error", (error) => {
+      console.error("Failed to auto-open browser child process:", error);
+    });
+    child.unref();
   } catch (error) {
     console.error("Failed to auto-open browser:", error);
   }
@@ -581,9 +600,18 @@ process.on("unhandledRejection", (reason) => {
   console.error("Unhandled rejection:", reason);
 });
 
-setInterval(() => {
+process.on("beforeExit", (code) => {
+  console.error(`[Lifecycle] beforeExit code=${code}`);
+});
+
+process.on("exit", (code) => {
+  console.error(`[Lifecycle] exit code=${code}`);
+});
+
+const keepAliveTimer = setInterval(() => {
   console.log(`[Watchdog] Server running, jobs: ${jobs.size}, time: ${new Date().toISOString()}`);
-}, 60000);
+}, 30000);
+keepAliveTimer.ref();
 
 console.log("[Watchdog] Server started with watchdog enabled");
 console.log(`[Config] Auto-delete after ${AUTO_DELETE_HOURS} hour(s)`);
