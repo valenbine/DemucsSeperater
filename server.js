@@ -2,14 +2,23 @@ import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream, unlink, existsSync } from "node:fs";
 import { mkdir as mkdirAsync, stat, readdir } from "node:fs/promises";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import archiver from "archiver";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const APP_ROOT = process.pkg ? path.join(process.cwd(), "assets") : __dirname;
+const APP_ROOT = process.pkg
+  ? path.join(path.dirname(process.execPath), "assets")
+  : __dirname;
 const PORT = Number(process.env.PORT || 8000);
-const RUNTIME_ROOT = process.pkg ? path.join(process.cwd(), ".runtime") : path.join(__dirname, ".runtime");
+const RUNTIME_ROOT = process.pkg
+  ? path.join(
+      process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
+      "DemucsSeperater",
+      ".runtime",
+    )
+  : path.join(__dirname, ".runtime");
 const UPLOAD_DIR = path.join(RUNTIME_ROOT, "uploads");
 const SEPARATED_DIR = path.join(RUNTIME_ROOT, "separated");
 const DEMUCS = process.env.DEMUCS || "demucs";
@@ -67,7 +76,33 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Demucs Stems server listening on http://127.0.0.1:${PORT}`);
+  if (process.pkg && process.env.NO_AUTO_OPEN !== "1") {
+    openBrowser(`http://127.0.0.1:${PORT}`);
+  }
 });
+
+function openBrowser(url) {
+  try {
+    if (process.platform === "win32") {
+      const command = `start "" "${url}"`;
+      spawn("cmd", ["/c", command], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      }).unref();
+      return;
+    }
+
+    if (process.platform === "darwin") {
+      spawn("open", [url], { detached: true, stdio: "ignore" }).unref();
+      return;
+    }
+
+    spawn("xdg-open", [url], { detached: true, stdio: "ignore" }).unref();
+  } catch (error) {
+    console.error("Failed to auto-open browser:", error);
+  }
+}
 
 async function handleHealth(request, response) {
   try {
