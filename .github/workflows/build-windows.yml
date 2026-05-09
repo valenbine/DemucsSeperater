@@ -25,6 +25,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate JavaScript syntax
+        run: |
+          node --check server.js
+          node --check src/main.js
+
       - name: Install build tools globally
         run: npm install -g pkg esbuild
 
@@ -60,11 +65,22 @@ jobs:
           cp packaging/windows/DemucsSeperater-Launcher.cmd dist/
           cp packaging/windows/DemucsSeperater-Launcher.vbs dist/
 
+      - name: Bundle FFmpeg for Windows runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist\bin | Out-Null
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "dist\ffmpeg.zip"
+          Expand-Archive -Path "dist\ffmpeg.zip" -DestinationPath "dist\ffmpeg" -Force
+          $ffmpeg = Get-ChildItem -Path "dist\ffmpeg" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          if (-not $ffmpeg) { throw "ffmpeg.exe was not found in downloaded archive" }
+          Copy-Item $ffmpeg.FullName "dist\bin\ffmpeg.exe" -Force
+          & "dist\bin\ffmpeg.exe" -version
+
       - name: Package artifact
         shell: bash
         run: |
           cd dist
-          powershell -Command "Compress-Archive -Path DemucsSeperater.exe,DemucsSeperater-Launcher.cmd,DemucsSeperater-Launcher.vbs,assets -DestinationPath DemucsSeperater-windows-x64.zip -Force"
+          powershell -Command "Compress-Archive -Path DemucsSeperater.exe,DemucsSeperater-Launcher.cmd,DemucsSeperater-Launcher.vbs,assets,bin -DestinationPath DemucsSeperater-windows-x64.zip -Force"
 
       - name: Build installer with Inno Setup
         run: choco install innosetup -y

@@ -84,6 +84,15 @@
             </select>
           </div>
 
+          <div class="model-selector">
+            <label for="stem-count-select">选择轨道数</label>
+            <select id="stem-count-select">
+              <option value="2">2 轨</option>
+              <option value="4" selected>4 轨</option>
+              <option value="6">6 轨</option>
+            </select>
+          </div>
+
           <label class="drop-zone" for="audio-file" id="drop-zone">
             <input id="audio-file" type="file" accept="audio/*" />
             <span class="drop-zone__title">选择或拖放音频文件</span>
@@ -167,68 +176,28 @@
           </div>
         </div>
 
-        <div class="stems-grid" id="stems-grid">
-          <div class="stem-card" data-stem="vocals">
-            <div class="stem-card__header">
-              <span class="stem-icon">🎤</span>
-              <h3>人声</h3>
-              <button class="mute-btn stem-mute" data-stem="vocals" title="静音">🔊</button>
-              <input type="range" class="volume-slider stem-volume" data-stem="vocals" min="0" max="100" value="80" title="音量">
-            </div>
-            <div class="stem-waveform" id="waveform-vocals">
-              <canvas id="canvas-vocals" width="400" height="80"></canvas>
-            </div>
-            <div class="stem-controls">
-              <button class="play-action stem-play" data-stem="vocals" disabled>播放</button>
-              <button class="secondary-action stem-download" data-stem="vocals" disabled>下载</button>
-            </div>
-          </div>
+        <div class="stems-grid" id="stems-grid"></div>
 
-          <div class="stem-card" data-stem="drums">
-            <div class="stem-card__header">
-              <span class="stem-icon">🥁</span>
-              <h3>鼓组</h3>
-              <button class="mute-btn stem-mute" data-stem="drums" title="静音">🔊</button>
-              <input type="range" class="volume-slider stem-volume" data-stem="drums" min="0" max="100" value="80" title="音量">
+        <div class="merge-panel" id="merge-panel" hidden>
+          <div class="merge-panel__topline">
+            <div>
+              <p class="eyebrow">Merge</p>
+              <h3>合并选中音轨</h3>
             </div>
-            <div class="stem-waveform" id="waveform-drums">
-              <canvas id="canvas-drums" width="400" height="80"></canvas>
-            </div>
-            <div class="stem-controls">
-              <button class="play-action stem-play" data-stem="drums" disabled>播放</button>
-              <button class="secondary-action stem-download" data-stem="drums" disabled>下载</button>
-            </div>
+            <button class="secondary-action" id="merge-toggle-button" disabled>选择合并轨道</button>
+            <button class="primary-action" id="merge-start-button" disabled>开始合并</button>
           </div>
+          <p class="status-copy" id="merge-copy">勾选需要合并的音轨，然后点击开始合并。</p>
 
-          <div class="stem-card" data-stem="bass">
-            <div class="stem-card__header">
-              <span class="stem-icon">🎸</span>
-              <h3>贝斯</h3>
-              <button class="mute-btn stem-mute" data-stem="bass" title="静音">🔊</button>
-              <input type="range" class="volume-slider stem-volume" data-stem="bass" min="0" max="100" value="80" title="音量">
+          <div class="merged-player" id="merged-player" hidden>
+            <div class="merged-player__header">
+              <strong>合并音轨</strong>
+              <span id="merged-time">0:00 / 0:00</span>
             </div>
-            <div class="stem-waveform" id="waveform-bass">
-              <canvas id="canvas-bass" width="400" height="80"></canvas>
-            </div>
+            <input type="range" id="merged-progress" class="master-progress" min="0" max="1000" value="0" step="1" aria-label="合并音轨进度" />
             <div class="stem-controls">
-              <button class="play-action stem-play" data-stem="bass" disabled>播放</button>
-              <button class="secondary-action stem-download" data-stem="bass" disabled>下载</button>
-            </div>
-          </div>
-
-          <div class="stem-card" data-stem="other">
-            <div class="stem-card__header">
-              <span class="stem-icon">🎹</span>
-              <h3>其他</h3>
-              <button class="mute-btn stem-mute" data-stem="other" title="静音">🔊</button>
-              <input type="range" class="volume-slider stem-volume" data-stem="other" min="0" max="100" value="80" title="音量">
-            </div>
-            <div class="stem-waveform" id="waveform-other">
-              <canvas id="canvas-other" width="400" height="80"></canvas>
-            </div>
-            <div class="stem-controls">
-              <button class="play-action stem-play" data-stem="other" disabled>播放</button>
-              <button class="secondary-action stem-download" data-stem="other" disabled>下载</button>
+              <button class="play-action" id="merged-play-button">播放合并音轨</button>
+              <button class="secondary-action" id="merged-download-button">下载合并音轨</button>
             </div>
           </div>
         </div>
