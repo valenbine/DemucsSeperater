@@ -69,7 +69,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist\bin | Out-Null
-          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.zip" -OutFile "dist\ffmpeg.zip"
+          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip" -OutFile "dist\ffmpeg.zip"
           Expand-Archive -Path "dist\ffmpeg.zip" -DestinationPath "dist\ffmpeg" -Force
           $ffmpegBin = Get-ChildItem -Path "dist\ffmpeg" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1 | ForEach-Object { $_.Directory.FullName }
           if (-not $ffmpegBin) { throw "ffmpeg.exe was not found in downloaded archive" }
