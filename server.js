@@ -7,17 +7,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import archiver from "archiver";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const MODULE_ROOT = typeof __dirname === "string" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = process.pkg
   ? path.join(path.dirname(process.execPath), "assets")
-  : __dirname;
+  : MODULE_ROOT;
 const PORT = Number(process.env.PORT || 8000);
 const APP_DATA_ROOT = process.pkg
   ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "DemucsSeperater")
   : path.join(__dirname, ".runtime");
 const RUNTIME_ROOT = process.pkg
   ? path.join(APP_DATA_ROOT, ".runtime")
-  : path.join(__dirname, ".runtime");
+  : path.join(MODULE_ROOT, ".runtime");
 const UPLOAD_DIR = path.join(RUNTIME_ROOT, "uploads");
 const SEPARATED_DIR = path.join(RUNTIME_ROOT, "separated");
 const LOG_DIR = path.join(APP_DATA_ROOT, "logs");
@@ -43,9 +43,6 @@ console.log(`[Startup] cwd=${process.cwd()}`);
 console.log(`[Startup] appRoot=${APP_ROOT}`);
 console.log(`[Startup] runtimeRoot=${RUNTIME_ROOT}`);
 console.log(`[Startup] logFile=${LOG_FILE}`);
-
-await mkdirAsync(UPLOAD_DIR, { recursive: true });
-await mkdirAsync(SEPARATED_DIR, { recursive: true });
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -91,12 +88,27 @@ server.on("error", (error) => {
   }
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Demucs Stems server listening on http://127.0.0.1:${PORT}`);
-  if (process.pkg && process.env.NO_AUTO_OPEN !== "1") {
-    openBrowser(`http://127.0.0.1:${PORT}`);
+startServer();
+
+async function startServer() {
+  try {
+    await mkdirAsync(UPLOAD_DIR, { recursive: true });
+    await mkdirAsync(SEPARATED_DIR, { recursive: true });
+  } catch (error) {
+    console.error("Startup directory initialization failed:", error);
+    if (process.pkg) {
+      setTimeout(() => process.exit(1), 5000);
+    }
+    return;
   }
-});
+
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Demucs Stems server listening on http://127.0.0.1:${PORT}`);
+    if (process.pkg && process.env.NO_AUTO_OPEN !== "1") {
+      openBrowser(`http://127.0.0.1:${PORT}`);
+    }
+  });
+}
 
 function setupFileLogging() {
   try {
