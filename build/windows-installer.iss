@@ -33,6 +33,7 @@ Source: "..\dist\DemucsSeperater.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\DemucsSeperater-Launcher.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\DemucsSeperater-Launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Dirs]
 Name: "{localappdata}\DemucsSeperater\logs"

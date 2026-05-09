@@ -14,7 +14,7 @@ const APP_ROOT = process.pkg
 const PORT = Number(process.env.PORT || 8000);
 const APP_DATA_ROOT = process.pkg
   ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "DemucsSeperater")
-  : path.join(__dirname, ".runtime");
+  : path.join(MODULE_ROOT, ".runtime");
 const RUNTIME_ROOT = process.pkg
   ? path.join(APP_DATA_ROOT, ".runtime")
   : path.join(MODULE_ROOT, ".runtime");
@@ -27,12 +27,20 @@ const DEMUCS = process.env.DEMUCS || "demucs";
 const MAX_UPLOAD_BYTES = 120 * 1024 * 1024;
 const AUTO_DELETE_HOURS = 1;
 const AVAILABLE_MODELS = [
-  { id: "htdemucs", name: "htdemucs (标准 4 轨)", stems: 4 },
-  { id: "htdemucs_ft", name: "htdemucs_ft (Fine-tuned)", stems: 4 },
-  { id: "mdx", name: "mdx (MDX 基础)", stems: 4 },
-  { id: "mdx_q", name: "mdx_q (MDX 量化版)", stems: 4 },
-  { id: "mdx_extra_q", name: "mdx_extra_q (MDX 增强量化)", stems: 4 },
+  { id: "htdemucs", name: "htdemucs (标准)", stemCounts: [2, 4] },
+  { id: "htdemucs_ft", name: "htdemucs_ft (Fine-tuned)", stemCounts: [2, 4] },
+  { id: "htdemucs_6s", name: "htdemucs_6s (6 轨)", stemCounts: [2, 6] },
+  { id: "hdemucs_mmi", name: "hdemucs_mmi", stemCounts: [2, 4] },
+  { id: "mdx", name: "mdx (MDX 基础)", stemCounts: [2, 4] },
+  { id: "mdx_q", name: "mdx_q (MDX 量化版)", stemCounts: [2, 4] },
+  { id: "mdx_extra", name: "mdx_extra (MDX 增强)", stemCounts: [2, 4] },
+  { id: "mdx_extra_q", name: "mdx_extra_q (MDX 增强量化)", stemCounts: [2, 4] },
 ];
+const STEM_ORDER_BY_COUNT = {
+  2: ["vocals", "no_vocals"],
+  4: ["vocals", "drums", "bass", "other"],
+  6: ["vocals", "drums", "bass", "guitar", "piano", "other"],
+};
 
 const jobs = new Map();
 
@@ -58,6 +66,10 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && request.url === "/api/stems") {
       return handleStems(request, response);
+    }
+
+    if (request.method === "POST" && request.url === "/api/merge") {
+      return handleMerge(request, response);
     }
 
     if (request.method === "GET" && request.url.startsWith("/api/status/")) {
@@ -218,7 +230,16 @@ async function handleStems(request, response) {
 
     const body = await readRequestBody(request, MAX_UPLOAD_BYTES);
     const file = await extractMultipartFile(body, boundary);
-    const model = await extractModelFromBody(body);
+    const model = extractMultipartField(body, boundary, "model") || "htdemucs";
+    const stemCount = Number(extractMultipartField(body, boundary, "stemCount") || 4);
+    const validation = validateModelStemCount(model, stemCount);
+
+    if (!validation.ok) {
+      return sendJson(response, 400, {
+        error: "invalid_model_stem_count",
+        message: validation.message,
+      });
+    }
 
     if (!file) {
       return sendJson(response, 400, {
@@ -234,7 +255,9 @@ async function handleStems(request, response) {
       progress: 0,
       fileName: file.fileName,
       model: model,
+      stemCount,
       stems: {},
+      merges: {},
       createdAt: Date.now(),
       inputPath: file.path,
       outputDir: path.join(SEPARATED_DIR, jobId),
@@ -274,8 +297,11 @@ async function handleStatus(request, response, jobId) {
   sendJson(response, 200, {
     status: job.status,
     progress: job.progress,
+    model: job.model,
+    stemCount: job.stemCount,
     error: job.error,
     stems: job.stems,
+    merges: job.merges,
     message: job.status === "completed" ? "分轨完成" : "处理中",
   });
 }
@@ -296,7 +322,7 @@ async function handleDownload(request, response, jobId, stem) {
     return serveAllStemsZip(response, job, forceDownload);
   }
 
-  const filePath = job.stems[stem];
+  const filePath = stem?.startsWith("merged_") ? job.merges?.[stem]?.path : job.stems[stem];
   if (!filePath) {
     return sendJson(response, 404, {
       error: "stem_not_found",
@@ -356,6 +382,61 @@ async function handleDownload(request, response, jobId, stem) {
   createReadStream(filePath).pipe(response);
 }
 
+async function handleMerge(request, response) {
+  try {
+    const body = await readRequestBody(request, 1024 * 1024);
+    const payload = JSON.parse(body.toString("utf8") || "{}");
+    const job = jobs.get(payload.jobId);
+    const selectedStems = Array.isArray(payload.stems) ? payload.stems : [];
+
+    if (!job || job.status !== "completed") {
+      return sendJson(response, 404, {
+        error: "job_not_ready",
+        message: "分轨任务未完成或不存在。",
+      });
+    }
+
+    const inputPaths = selectedStems.map((stem) => job.stems[stem]).filter(Boolean);
+    if (inputPaths.length < 1) {
+      return sendJson(response, 400, {
+        error: "missing_stems",
+        message: "请至少选择一个要合并的音轨。",
+      });
+    }
+
+    const mergeId = `merged_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const outputPath = path.join(job.outputDir, `${mergeId}.wav`);
+    const args = [];
+    for (const inputPath of inputPaths) {
+      args.push("-i", inputPath);
+    }
+    args.push("-filter_complex", `amix=inputs=${inputPaths.length}:duration=longest:normalize=0`, "-y", outputPath);
+
+    const result = await runCommand("ffmpeg", args, 600000);
+    if (result.code !== 0) {
+      throw new Error(`合并失败: ${result.stderr || result.stdout}`);
+    }
+
+    job.merges[mergeId] = {
+      id: mergeId,
+      stems: selectedStems,
+      path: outputPath,
+    };
+
+    sendJson(response, 200, {
+      mergeId,
+      stems: selectedStems,
+      url: `/api/download/${job.id}/${mergeId}`,
+      message: "合并完成。",
+    });
+  } catch (error) {
+    sendJson(response, 500, {
+      error: "merge_failed",
+      message: error.message || "合并失败。",
+    });
+  }
+}
+
 async function serveAllStemsZip(response, job, forceDownload = true) {
   const archive = archiver("zip", { zlib: { level: 9 } });
 
@@ -387,9 +468,15 @@ async function runDemucs(job) {
   job.progress = 5;
 
   const modelArg = job.model || "htdemucs";
+  const stemCount = job.stemCount || 4;
+  const args = ["-o", job.outputDir, "-n", modelArg];
+  if (stemCount === 2) {
+    args.push("--two-stems", "vocals");
+  }
+  args.push(job.inputPath);
   const result = await runCommand(
     DEMUCS,
-    ["-o", job.outputDir, "-n", modelArg, job.inputPath],
+    args,
     600000,
   );
 
@@ -403,7 +490,7 @@ async function runDemucs(job) {
   const modelDir = path.join(job.outputDir, modelArg, path.basename(job.inputPath).replace(/\.[^.]+$/, ""));
   const stems = {};
 
-  for (const stem of ["vocals", "drums", "bass", "other"]) {
+  for (const stem of STEM_ORDER_BY_COUNT[stemCount] || STEM_ORDER_BY_COUNT[4]) {
     const stemPath = path.join(modelDir, `${stem}.wav`);
     try {
       const statResult = await stat(stemPath);
@@ -535,8 +622,37 @@ async function extractMultipartFile(body, boundary) {
   return null;
 }
 
-async function extractModelFromBody(body) {
-  return "htdemucs";
+function extractMultipartField(body, boundary, fieldName) {
+  const boundaryText = `--${boundary}`;
+  const sections = body.toString("latin1").split(boundaryText);
+
+  for (const section of sections) {
+    if (!section.includes(`name="${fieldName}"`) || section.includes("filename=")) {
+      continue;
+    }
+
+    const headerEnd = section.indexOf("\r\n\r\n");
+    if (headerEnd < 0) {
+      continue;
+    }
+
+    return section.slice(headerEnd + 4).replace(/\r\n--$/, "").replace(/\r\n$/, "").trim();
+  }
+
+  return "";
+}
+
+function validateModelStemCount(model, stemCount) {
+  const modelInfo = AVAILABLE_MODELS.find((item) => item.id === model);
+  if (!modelInfo) {
+    return { ok: false, message: `未知模型: ${model}` };
+  }
+
+  if (!modelInfo.stemCounts.includes(stemCount)) {
+    return { ok: false, message: `${model} 不支持 ${stemCount} 轨分离。` };
+  }
+
+  return { ok: true };
 }
 
 function writeFileFromLatin1(target, content) {
