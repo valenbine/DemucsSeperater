@@ -32,8 +32,13 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "..\dist\DemucsSeperater.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Dirs]
+Name: "{localappdata}\DemucsSeperater\logs"
+
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
+Name: "{autoprograms}\{#MyAppName} Debug Console"; Filename: "{cmd}"; Parameters: "/K ""{app}\{#MyAppExeName}"""; WorkingDir: "{app}"
+Name: "{autoprograms}\Open {#MyAppName} Logs"; Filename: "{win}\explorer.exe"; Parameters: """{localappdata}\DemucsSeperater\logs"""
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]

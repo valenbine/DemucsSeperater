@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createReadStream, createWriteStream, unlink, existsSync } from "node:fs";
+import { appendFileSync, createReadStream, createWriteStream, mkdirSync, unlink, existsSync } from "node:fs";
 import { mkdir as mkdirAsync, stat, readdir } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -12,15 +12,16 @@ const APP_ROOT = process.pkg
   ? path.join(path.dirname(process.execPath), "assets")
   : __dirname;
 const PORT = Number(process.env.PORT || 8000);
+const APP_DATA_ROOT = process.pkg
+  ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "DemucsSeperater")
+  : path.join(__dirname, ".runtime");
 const RUNTIME_ROOT = process.pkg
-  ? path.join(
-      process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
-      "DemucsSeperater",
-      ".runtime",
-    )
+  ? path.join(APP_DATA_ROOT, ".runtime")
   : path.join(__dirname, ".runtime");
 const UPLOAD_DIR = path.join(RUNTIME_ROOT, "uploads");
 const SEPARATED_DIR = path.join(RUNTIME_ROOT, "separated");
+const LOG_DIR = path.join(APP_DATA_ROOT, "logs");
+const LOG_FILE = path.join(LOG_DIR, "app.log");
 const DEMUCS = process.env.DEMUCS || "demucs";
 const MAX_UPLOAD_BYTES = 120 * 1024 * 1024;
 const AUTO_DELETE_HOURS = 1;
@@ -33,6 +34,15 @@ const AVAILABLE_MODELS = [
 ];
 
 const jobs = new Map();
+
+setupFileLogging();
+console.log("[Startup] DemucsSeperater starting");
+console.log(`[Startup] packaged=${Boolean(process.pkg)}`);
+console.log(`[Startup] execPath=${process.execPath}`);
+console.log(`[Startup] cwd=${process.cwd()}`);
+console.log(`[Startup] appRoot=${APP_ROOT}`);
+console.log(`[Startup] runtimeRoot=${RUNTIME_ROOT}`);
+console.log(`[Startup] logFile=${LOG_FILE}`);
 
 await mkdirAsync(UPLOAD_DIR, { recursive: true });
 await mkdirAsync(SEPARATED_DIR, { recursive: true });
@@ -74,12 +84,42 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
+server.on("error", (error) => {
+  console.error("Server listen error:", error);
+  if (process.pkg) {
+    setTimeout(() => process.exit(1), 5000);
+  }
+});
+
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Demucs Stems server listening on http://127.0.0.1:${PORT}`);
   if (process.pkg && process.env.NO_AUTO_OPEN !== "1") {
     openBrowser(`http://127.0.0.1:${PORT}`);
   }
 });
+
+function setupFileLogging() {
+  try {
+    mkdirSync(LOG_DIR, { recursive: true });
+    appendFileSync(LOG_FILE, `\n===== ${new Date().toISOString()} =====\n`, "utf8");
+  } catch (error) {
+    console.error("Failed to initialize file logging:", error);
+    return;
+  }
+
+  for (const method of ["log", "warn", "error"]) {
+    const original = console[method].bind(console);
+    console[method] = (...args) => {
+      original(...args);
+      try {
+        const line = args
+          .map((arg) => (arg instanceof Error ? `${arg.stack || arg.message}` : String(arg)))
+          .join(" ");
+        appendFileSync(LOG_FILE, `[${new Date().toISOString()}] [${method.toUpperCase()}] ${line}\n`, "utf8");
+      } catch {}
+    };
+  }
+}
 
 function openBrowser(url) {
   try {
@@ -522,7 +562,11 @@ function sendJson(response, statusCode, data) {
 }
 
 process.on("uncaughtException", (error) => {
-  console.error(error);
+  console.error("Uncaught exception:", error);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled rejection:", reason);
 });
 
 setInterval(() => {
