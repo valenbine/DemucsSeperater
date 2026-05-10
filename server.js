@@ -24,6 +24,7 @@ const LOG_DIR = path.join(APP_DATA_ROOT, "logs");
 const LOG_FILE = path.join(LOG_DIR, "app.log");
 const TORCH_HOME = process.env.TORCH_HOME || path.join(APP_DATA_ROOT, "torch");
 const DEMUCS = process.env.DEMUCS || "demucs";
+const HEALTH_CHECK_TIMEOUT_MS = 30000;
 const MAX_UPLOAD_BYTES = 120 * 1024 * 1024;
 const AUTO_DELETE_HOURS = 1;
 const AVAILABLE_MODELS = [
@@ -192,13 +193,16 @@ function openBrowser(url) {
 
 async function handleHealth(request, response) {
   try {
-    const result = await runCommand(DEMUCS, ["--help"], 5000);
+    const result = await runCommand(DEMUCS, ["--help"], HEALTH_CHECK_TIMEOUT_MS);
     const demucsAvailable = result.code === 0;
+    const timedOut = result.error === "Command timeout";
     sendJson(response, 200, {
-      ok: demucsAvailable,
-      version: demucsAvailable ? "available" : "not found",
+      ok: demucsAvailable || timedOut,
+      version: demucsAvailable ? "available" : timedOut ? "initializing" : "not found",
       message: demucsAvailable
         ? "Demucs 可用"
+        : timedOut
+          ? "Demucs 正在初始化，首次加载可能较慢；如果可以正常分轨，可忽略此提示。"
         : "未检测到 Demucs，请安装: pip install demucs",
     });
   } catch (error) {
