@@ -22,6 +22,7 @@ function Get-AppDirectory {
 
 $appDir = Get-AppDirectory
 $serverExe = Join-Path $appDir "DemucsSeperater.exe"
+$iconPath = Join-Path $appDir "DemucsSeperater.ico"
 $logDir = Join-Path $env:LOCALAPPDATA "DemucsSeperater\logs"
 $launcherLog = Join-Path $logDir "tray.log"
 $appLog = Join-Path $logDir "app.log"
@@ -125,7 +126,11 @@ function Update-MenuState {
 }
 
 $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
-$notifyIcon.Icon = [System.Drawing.SystemIcons]::Application
+if (Test-Path $iconPath) {
+  $notifyIcon.Icon = New-Object System.Drawing.Icon($iconPath)
+} else {
+  $notifyIcon.Icon = [System.Drawing.SystemIcons]::Application
+}
 $notifyIcon.Visible = $true
 $notifyIcon.Text = "DemucsSeperater"
 
