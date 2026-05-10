@@ -11,6 +11,8 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout source
@@ -104,14 +106,20 @@ jobs:
       - name: Compile Setup.exe
         run: iscc /DMyAppVersion=${{ github.ref_name }} build\\windows-installer.iss
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v5
-        with:
-          name: DemucsSeperater-windows-x64
-          path: dist/DemucsSeperater-windows-x64.zip
-
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v5
-        with:
-          name: DemucsSeperater-Setup-x64
-          path: dist/DemucsSeperater-Setup-x64.exe
+      - name: Publish Windows release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "windows-latest"
+          $title = "Latest Windows Build"
+          $notes = "Automated Windows build from $env:GITHUB_SHA."
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title $title --notes $notes --latest=false
+          }
+          gh release upload $tag `
+            dist\DemucsSeperater-windows-x64.zip `
+            dist\DemucsSeperater-Setup-x64.exe `
+            --repo $env:GITHUB_REPOSITORY `
+            --clobber
