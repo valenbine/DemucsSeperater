@@ -30,6 +30,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "..\dist\DemucsSeperater.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\DemucsSeperater-Tray.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\DemucsSeperater-Launcher.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\DemucsSeperater-Launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -39,10 +40,10 @@ Source: "..\dist\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdi
 Name: "{localappdata}\DemucsSeperater\logs"
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\DemucsSeperater-Launcher.vbs"""; WorkingDir: "{app}"
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\DemucsSeperater-Tray.exe"; WorkingDir: "{app}"
 Name: "{autoprograms}\{#MyAppName} Debug Console"; Filename: "{cmd}"; Parameters: "/K ""{app}\DemucsSeperater-Launcher.cmd"""; WorkingDir: "{app}"
 Name: "{autoprograms}\Open {#MyAppName} Logs"; Filename: "{win}\explorer.exe"; Parameters: """{localappdata}\DemucsSeperater\logs"""
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\DemucsSeperater-Launcher.vbs"""; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\DemucsSeperater-Tray.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{sys}\wscript.exe"; Parameters: """{app}\DemucsSeperater-Launcher.vbs"""; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\DemucsSeperater-Tray.exe"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent

@@ -33,6 +33,10 @@ jobs:
       - name: Install build tools globally
         run: npm install -g pkg esbuild
 
+      - name: Install PowerShell packaging tools
+        shell: pwsh
+        run: Install-Module ps2exe -Scope CurrentUser -Force
+
       - name: Bundle server entrypoint
         shell: bash
         run: |
@@ -64,6 +68,13 @@ jobs:
           cp -r scripts dist/assets/scripts
           cp packaging/windows/DemucsSeperater-Launcher.cmd dist/
           cp packaging/windows/DemucsSeperater-Launcher.vbs dist/
+          cp packaging/windows/DemucsSeperater-Tray.ps1 dist/
+
+      - name: Build Windows tray controller
+        shell: pwsh
+        run: |
+          Invoke-ps2exe .\dist\DemucsSeperater-Tray.ps1 .\dist\DemucsSeperater-Tray.exe -noConsole -title "DemucsSeperater" -description "DemucsSeperater tray controller" -company "猫仙森MRCAT" -product "DemucsSeperater"
+          if (-not (Test-Path "dist\DemucsSeperater-Tray.exe")) { throw "Tray executable was not created" }
 
       - name: Bundle FFmpeg for Windows runtime
         shell: pwsh
@@ -81,7 +92,7 @@ jobs:
         shell: bash
         run: |
           cd dist
-          powershell -Command "Compress-Archive -Path DemucsSeperater.exe,DemucsSeperater-Launcher.cmd,DemucsSeperater-Launcher.vbs,assets,bin -DestinationPath DemucsSeperater-windows-x64.zip -Force"
+          powershell -Command "Compress-Archive -Path DemucsSeperater.exe,DemucsSeperater-Tray.exe,DemucsSeperater-Tray.ps1,DemucsSeperater-Launcher.cmd,DemucsSeperater-Launcher.vbs,assets,bin -DestinationPath DemucsSeperater-windows-x64.zip -Force"
 
       - name: Build installer with Inno Setup
         run: choco install innosetup -y
