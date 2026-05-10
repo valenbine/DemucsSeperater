@@ -3,7 +3,24 @@ Add-Type -AssemblyName System.Drawing
 
 $ErrorActionPreference = "Stop"
 
-$appDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+function Get-AppDirectory {
+  $processPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+  if (-not [string]::IsNullOrWhiteSpace($processPath) -and (Test-Path $processPath)) {
+    return Split-Path -Parent $processPath
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($PSCommandPath) -and (Test-Path $PSCommandPath)) {
+    return Split-Path -Parent $PSCommandPath
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($MyInvocation.MyCommand.Path) -and (Test-Path $MyInvocation.MyCommand.Path)) {
+    return Split-Path -Parent $MyInvocation.MyCommand.Path
+  }
+
+  return (Get-Location).Path
+}
+
+$appDir = Get-AppDirectory
 $serverExe = Join-Path $appDir "DemucsSeperater.exe"
 $logDir = Join-Path $env:LOCALAPPDATA "DemucsSeperater\logs"
 $launcherLog = Join-Path $logDir "tray.log"
