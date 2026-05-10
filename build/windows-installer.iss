@@ -17,6 +17,7 @@ DisableProgramGroupPage=yes
 LicenseFile=
 OutputDir=..\dist
 OutputBaseFilename=DemucsSeperater-Setup-x64
+SetupIconFile=..\dist\DemucsSeperater.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -31,6 +32,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Files]
 Source: "..\dist\DemucsSeperater.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\DemucsSeperater-Tray.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\DemucsSeperater.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\DemucsSeperater.svg"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\DemucsSeperater-Launcher.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\DemucsSeperater-Launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -40,10 +43,10 @@ Source: "..\dist\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdi
 Name: "{localappdata}\DemucsSeperater\logs"
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\DemucsSeperater-Tray.exe"; WorkingDir: "{app}"
-Name: "{autoprograms}\{#MyAppName} Debug Console"; Filename: "{cmd}"; Parameters: "/K ""{app}\DemucsSeperater-Launcher.cmd"""; WorkingDir: "{app}"
-Name: "{autoprograms}\Open {#MyAppName} Logs"; Filename: "{win}\explorer.exe"; Parameters: """{localappdata}\DemucsSeperater\logs"""
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\DemucsSeperater-Tray.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\DemucsSeperater-Tray.exe"; WorkingDir: "{app}"; IconFilename: "{app}\DemucsSeperater.ico"
+Name: "{autoprograms}\{#MyAppName} Debug Console"; Filename: "{cmd}"; Parameters: "/K ""{app}\DemucsSeperater-Launcher.cmd"""; WorkingDir: "{app}"; IconFilename: "{app}\DemucsSeperater.ico"
+Name: "{autoprograms}\Open {#MyAppName} Logs"; Filename: "{win}\explorer.exe"; Parameters: """{localappdata}\DemucsSeperater\logs"""; IconFilename: "{app}\DemucsSeperater.ico"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\DemucsSeperater-Tray.exe"; WorkingDir: "{app}"; IconFilename: "{app}\DemucsSeperater.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\DemucsSeperater-Tray.exe"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent

@@ -30,6 +30,9 @@ jobs:
           node --check server.js
           node --check src/main.js
 
+      - name: Generate Windows icon
+        run: node scripts/generate-windows-icon.mjs
+
       - name: Install build tools globally
         run: npm install -g pkg esbuild
 
@@ -69,11 +72,12 @@ jobs:
           cp packaging/windows/DemucsSeperater-Launcher.cmd dist/
           cp packaging/windows/DemucsSeperater-Launcher.vbs dist/
           cp packaging/windows/DemucsSeperater-Tray.ps1 dist/
+          cp packaging/windows/DemucsSeperater.svg dist/
 
       - name: Build Windows tray controller
         shell: pwsh
         run: |
-          Invoke-ps2exe .\dist\DemucsSeperater-Tray.ps1 .\dist\DemucsSeperater-Tray.exe -noConsole -title "DemucsSeperater" -description "DemucsSeperater tray controller" -company "猫仙森MRCAT" -product "DemucsSeperater"
+          Invoke-ps2exe .\dist\DemucsSeperater-Tray.ps1 .\dist\DemucsSeperater-Tray.exe -noConsole -iconFile .\dist\DemucsSeperater.ico -title "DemucsSeperater" -description "DemucsSeperater tray controller" -company "猫仙森MRCAT" -product "DemucsSeperater"
           if (-not (Test-Path "dist\DemucsSeperater-Tray.exe")) { throw "Tray executable was not created" }
 
       - name: Bundle FFmpeg for Windows runtime
@@ -92,7 +96,7 @@ jobs:
         shell: bash
         run: |
           cd dist
-          powershell -Command "Compress-Archive -Path DemucsSeperater.exe,DemucsSeperater-Tray.exe,DemucsSeperater-Tray.ps1,DemucsSeperater-Launcher.cmd,DemucsSeperater-Launcher.vbs,assets,bin -DestinationPath DemucsSeperater-windows-x64.zip -Force"
+          powershell -Command "Compress-Archive -Path DemucsSeperater.exe,DemucsSeperater-Tray.exe,DemucsSeperater-Tray.ps1,DemucsSeperater.ico,DemucsSeperater.svg,DemucsSeperater-Launcher.cmd,DemucsSeperater-Launcher.vbs,assets,bin -DestinationPath DemucsSeperater-windows-x64.zip -Force"
 
       - name: Build installer with Inno Setup
         run: choco install innosetup -y
