@@ -114,7 +114,7 @@ stemCountSelect.addEventListener("change", () => {
 });
 
 downloadAllButton.addEventListener("click", () => {
-  if (currentJobId) window.location.href = `/api/download/${currentJobId}/all?download=1`;
+  if (currentJobId) triggerDownload(`/api/download/${encodeURIComponent(currentJobId)}/all?download=1`);
 });
 document.getElementById("play-all-btn").addEventListener("click", playAllStems);
 document.getElementById("stop-all-btn").addEventListener("click", stopAllStems);
@@ -151,7 +151,7 @@ mergeToggleButton.addEventListener("click", () => {
 mergeStartButton.addEventListener("click", mergeSelectedStems);
 mergedPlayButton.addEventListener("click", toggleMergedPlayback);
 mergedDownloadButton.addEventListener("click", () => {
-  if (currentJobId && mergedId) window.location.href = `/api/download/${currentJobId}/${mergedId}?download=1`;
+  if (currentJobId && mergedId) triggerDownload(`/api/download/${encodeURIComponent(currentJobId)}/${encodeURIComponent(mergedId)}?download=1`);
 });
 mergedProgress.addEventListener("input", () => {
   mergedSeeking = true;
@@ -579,7 +579,15 @@ function updatePlayButtons() {
 }
 
 function downloadStem(stem) {
-  if (currentJobId) window.location.href = `/api/download/${currentJobId}/${stem}?download=1`;
+  if (currentJobId) triggerDownload(`/api/download/${encodeURIComponent(currentJobId)}/${encodeURIComponent(stem)}?download=1`);
+}
+
+function triggerDownload(url) {
+  const iframe = document.createElement("iframe");
+  iframe.hidden = true;
+  iframe.src = url;
+  document.body.appendChild(iframe);
+  window.setTimeout(() => iframe.remove(), 60000);
 }
 
 function updateMergeButtonState() {
