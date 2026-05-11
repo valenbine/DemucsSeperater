@@ -33,6 +33,48 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
 
 [按上述格式记录的记忆条目]
 
+### DemucsSeperater 项目构建与发布流程
+- Date: 2026-05-11
+- Context: Agent 在执行 Windows 安装包、托盘程序、图标和 GitHub Actions 发布流程时发现
+- Category: 构建方法
+- Instructions:
+  - 当前项目是 Node.js 前后端一体服务，后端入口为 `server.js`，前端入口为 `index.html` 和 `src/main.js`，本地可通过 `PORT=8050 NO_AUTO_OPEN=1 npm start` 预览，也可默认使用 `npm start` 监听 8000。
+  - Windows 构建 workflow 位于 `.github/workflows/build-windows.yml`，使用 Node.js 24，并使用 `actions/checkout@v5`、`actions/setup-node@v5`，避免 Node.js 20 actions deprecation warning。
+  - workflow 不再使用 `actions/upload-artifact`，Windows 产物通过 `gh release upload` 发布到滚动 Release `windows-latest`，包含 `DemucsSeperater-Setup-x64.exe` 和 `DemucsSeperater-windows-x64.zip`。
+  - Windows 打包会用 `esbuild` 将 `server.js` 打包为 `dist/pkg/server.cjs`，再用 `pkg` 生成 `dist/DemucsSeperater.exe`。
+  - Windows 安装器脚本位于 `build/windows-installer.iss`，使用 Inno Setup 编译 `DemucsSeperater-Setup-x64.exe`。
+
+### DemucsSeperater Windows 托盘与运行时约定
+- Date: 2026-05-11
+- Context: Agent 在实现 Windows 托盘控制、FFmpeg 打包和运行时日志时发现
+- Category: 环境配置
+- Instructions:
+  - Windows 安装版入口是 `DemucsSeperater-Tray.exe`，由 `packaging/windows/DemucsSeperater-Tray.ps1` 通过 `ps2exe` 编译生成；托盘菜单支持打开网页界面、启动服务、停止服务、重启服务、打开日志目录和退出。
+  - 托盘程序启动并管理 `DemucsSeperater.exe` 后端服务，双击托盘图标会打开 `http://127.0.0.1:8000`，退出托盘时会停止后端服务。
+  - Windows 日志目录为 `%LOCALAPPDATA%\DemucsSeperater\logs`，主要日志包含 `app.log`、`tray.log` 和 `launcher.log`。
+  - 打包版运行数据目录为 `%LOCALAPPDATA%\DemucsSeperater`，运行时目录为 `%LOCALAPPDATA%\DemucsSeperater\.runtime`，Torch 模型缓存目录为 `%LOCALAPPDATA%\DemucsSeperater\torch`。
+  - Windows 安装包内置 BtbN FFmpeg full-shared build，并将 `{app}\bin` 加入 PATH，同时设置 `FFMPEG_BINARY={app}\bin\ffmpeg.exe`，以满足 TorchCodec 对 FFmpeg shared DLL 的要求。
+
+### DemucsSeperater 功能实现约定
+- Date: 2026-05-11
+- Context: Agent 在实现模型联动、多轨播放、合并和下载修复时发现
+- Category: 代码模式
+- Instructions:
+  - `/api/models` 返回模型及支持的 `stemCounts`；`htdemucs_6s` 只允许 2 轨和 6 轨，其他模型只允许 2 轨和 4 轨；后端通过 `validateModelStemCount` 做强校验。
+  - 2 轨分离使用 Demucs 参数 `--two-stems vocals`，输出 `vocals` 和 `no_vocals`；4 轨输出 `vocals/drums/bass/other`；6 轨输出 `vocals/drums/bass/guitar/piano/other`。
+  - 合并接口为 `POST /api/merge`，使用内置或系统 `ffmpeg` 的 `amix` 生成 `merged_*.wav`，并通过 `/api/download/:jobId/:stem` 复用下载和播放逻辑。
+  - 前端下载不能使用 `window.location.href`，应使用隐藏 iframe 的 `triggerDownload`，避免下载失败时当前页面跳到 404 或空白页。
+  - 多轨播放使用独立 Audio 对象和 WebAudio gain 节点；播放全部前等待音轨可播放并同步 `currentTime`，播放过程中用轻量校准减少不同步；合并音轨播放和上方分轨播放互斥。
+
+### DemucsSeperater 图标与品牌资源
+- Date: 2026-05-11
+- Context: Agent 在设计并接入 Windows 应用图标时发现
+- Category: 代码生成
+- Instructions:
+  - 品牌图标源文件位于 `packaging/windows/DemucsSeperater.svg`，设计为深色圆角底、青绿到蓝紫渐变、唱片核心和分轨声波符号。
+  - 图标生成脚本为 `scripts/generate-windows-icon.mjs`，依赖 `sharp` 和 `png-to-ico`，构建时生成 `dist/DemucsSeperater.ico` 和 `dist/DemucsSeperater-256.png`。
+  - `DemucsSeperater.ico` 会用于托盘图标、`ps2exe` 编译图标、Inno Setup 安装器图标、开始菜单快捷方式和桌面快捷方式。
+
 ### KeyBeat 仓库确认
 - Date: 2026-04-27
 - Context: 用户确认 Chordinor 后续要评估接入 KeyBeat 时提供仓库地址
